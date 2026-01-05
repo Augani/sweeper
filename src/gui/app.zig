@@ -102,7 +102,8 @@ pub const GuiApp = struct {
     selected_size: u64,
     scan_progress: f32,
     status_message: []const u8,
-    
+    status_buf: [128]u8, // Buffer for formatted status messages
+
     // Chart stats
     category_sizes: [10]u64,
 
@@ -142,6 +143,7 @@ pub const GuiApp = struct {
             .selected_size = 0,
             .scan_progress = 0,
             .status_message = "Ready to scan",
+            .status_buf = [_]u8{0} ** 128,
             .category_sizes = [_]u64{0} ** 10,
             .file_deleter = null,
             .delete_progress = 0,
@@ -534,12 +536,12 @@ pub const GuiApp = struct {
         };
 
         // macOS-specific paths
+        // Note: We only scan specific subfolders, NOT parent folders like ~/Library/Caches
+        // because the parent contains system caches that can't be deleted
         const macos_paths = [_]struct { suffix: []const u8, category: analyzer.FileCategory }{
-            // System
-            .{ .suffix = "/Library/Caches", .category = .cache },
-            .{ .suffix = "/Library/Logs", .category = .log },
+            // Trash
             .{ .suffix = "/.Trash", .category = .temporary },
-            // Xcode & iOS
+            // Xcode & iOS Development
             .{ .suffix = "/Library/Developer/Xcode/DerivedData", .category = .dev_artifact },
             .{ .suffix = "/Library/Developer/Xcode/Archives", .category = .dev_artifact },
             .{ .suffix = "/Library/Developer/CoreSimulator/Caches", .category = .cache },
@@ -550,16 +552,20 @@ pub const GuiApp = struct {
             .{ .suffix = "/Library/Application Support/Code/CachedExtensionVSIXs", .category = .cache },
             .{ .suffix = "/Library/Application Support/Code/Cache", .category = .cache },
             .{ .suffix = "/Library/Application Support/Code/CachedData", .category = .cache },
-            // Browsers
+            // Browsers (specific app caches, not system caches)
             .{ .suffix = "/Library/Caches/Google/Chrome", .category = .browser_data },
             .{ .suffix = "/Library/Caches/com.apple.Safari", .category = .browser_data },
             .{ .suffix = "/Library/Caches/Firefox", .category = .browser_data },
-            // JetBrains on macOS
+            .{ .suffix = "/Library/Caches/org.mozilla.firefox", .category = .browser_data },
+            // JetBrains IDEs
             .{ .suffix = "/Library/Caches/JetBrains", .category = .cache },
-            // Homebrew
+            // Package managers
             .{ .suffix = "/Library/Caches/Homebrew", .category = .cache },
-            // Pip on macOS
             .{ .suffix = "/Library/Caches/pip", .category = .cache },
+            .{ .suffix = "/Library/Caches/yarn", .category = .cache },
+            // npm/node
+            .{ .suffix = "/.npm", .category = .cache },
+            .{ .suffix = "/.node-gyp", .category = .cache },
         };
 
         // Linux-specific paths
@@ -997,17 +1003,20 @@ pub const GuiApp = struct {
         };
         defer self.allocator.free(results);
 
-        // Calculate freed space and count successes
+        // Calculate freed space and count successes/failures
         var freed: u64 = 0;
         var success_count: usize = 0;
+        var fail_count: usize = 0;
         for (results) |result| {
             if (result.success) {
                 freed += result.bytes_freed;
                 success_count += 1;
+            } else {
+                fail_count += 1;
             }
         }
 
-        // Remove successfully deleted items from the list
+        // Remove successfully deleted items from the list, deselect failed items
         var i: usize = 0;
         while (i < self.files.items.len) {
             const file = &self.files.items[i];
@@ -1015,8 +1024,8 @@ pub const GuiApp = struct {
                 // Check if this file was successfully deleted
                 var was_deleted = false;
                 for (results) |result| {
-                    if (result.success and std.mem.eql(u8, result.path, file.path)) {
-                        was_deleted = true;
+                    if (std.mem.eql(u8, result.path, file.path)) {
+                        was_deleted = result.success;
                         break;
                     }
                 }
@@ -1025,6 +1034,9 @@ pub const GuiApp = struct {
                     self.allocator.free(file.path);
                     _ = self.files.orderedRemove(i);
                     continue;
+                } else {
+                    // Deselect failed items so user can try again or skip them
+                    file.selected = false;
                 }
             }
             i += 1;
@@ -1036,7 +1048,17 @@ pub const GuiApp = struct {
         self.selected_size = 0;
         self.updateFilteredList();
         self.view = .results;
-        self.status_message = "Deletion complete";
+
+        // Show appropriate status message
+        if (fail_count == 0) {
+            self.status_message = "Deletion complete";
+        } else if (success_count == 0) {
+            self.status_message = "Deletion failed - permission denied";
+        } else {
+            // Some succeeded, some failed - format a message
+            const msg = std.fmt.bufPrint(&self.status_buf, "{d} deleted, {d} failed (permission denied)", .{ success_count, fail_count }) catch "Partial deletion";
+            self.status_message = msg;
+        }
     }
 
     /// Undo last deletion
