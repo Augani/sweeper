@@ -44,7 +44,7 @@ jobs:
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
       
       - name: Package (Unix)
-        if: matrix.os \!= 'windows-latest'
+        if: matrix.os != 'windows-latest'
         run: |
           mkdir -p sweeper-${{ matrix.name }}
           cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
