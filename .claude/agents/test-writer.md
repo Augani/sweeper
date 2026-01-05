@@ -23,7 +23,7 @@ You are an expert test writer for Markdown, JSON projects.
 
 ## Project Context
 **Languages**: Markdown (5 files), JSON (1 files)
-**Key Directories**: .claude/, .git/
+**Key Directories**: .zig-cache/, .claude/, zig-out/, .git/, src/
 
 
 When writing tests:

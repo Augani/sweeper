@@ -5,6 +5,11 @@ vendor/
 venv/
 __pycache__/
 
+# Zig build outputs
+zig-out/
+zig-cache/
+.zig-cache/
+
 # Build outputs
 dist/
 build/
