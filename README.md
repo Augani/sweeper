@@ -7,10 +7,13 @@ A fast, cross-platform disk cleanup utility built with Zig and raylib.
 ## Features
 
 - **Smart Detection**: Automatically finds dev artifacts (node_modules, target/, build/), caches, and temporary files
-- **Safe Cleanup**: Preview everything before deletion with confidence scores
+- **Confidence Scores**: Each item shows a safety rating (70-98%) based on category and age
+- **Stale Detection**: Projects not modified in 90+ days are highlighted for safe cleanup
+- **Safe Cleanup**: Preview everything before deletion - moves to trash by default for easy undo
+- **Undo Support**: Press `Z` to restore the last deleted item from trash
 - **Cross-Platform**: Native support for macOS, Linux, and Windows
 - **Beautiful UI**: Modern dark theme with donut charts and intuitive navigation
-- **Fast Scanning**: Uses optimized system commands for rapid directory discovery
+- **Fast Scanning**: Uses optimized system commands (`find`/PowerShell) for rapid discovery
 - **Comprehensive Coverage**: Scans package manager caches, IDE extensions, browser data, and more
 
 ## What Sweeper Finds
@@ -76,9 +79,11 @@ Download from the [Releases](https://github.com/augani/sweeper/releases) page.
 | Key | Action |
 |-----|--------|
 | `R` | Rescan |
-| `A` | Select All |
+| `A` | Select All / Deselect All |
 | `D` | Delete Selected |
-| `Esc` | Cancel/Close |
+| `Z` | Undo Last Deletion |
+| `Enter` | Confirm Delete (in dialog) |
+| `Esc` | Cancel/Close Dialog |
 | `Q` | Quit |
 
 ## Configuration
@@ -93,10 +98,13 @@ Sweeper uses sensible defaults but can be configured:
 
 Sweeper is designed with safety in mind:
 
-- **Preview First**: All items shown before deletion
+- **Preview First**: All items shown before deletion with size and category
 - **No System Files**: Never touches OS-critical directories
-- **Confidence Scores**: Each item has a safety rating
-- **Undo Support**: Moves to trash instead of permanent deletion (where supported)
+- **Confidence Scores**: Each item shows 70-98% safety rating based on:
+  - Category (caches/temp = 95%+, dev artifacts = 70-90%)
+  - Age (stale projects 90+ days = higher confidence)
+- **Trash by Default**: Moves to system trash instead of permanent deletion
+- **Undo Support**: Press `Z` to restore last deleted item
 
 ## Building for Release
 

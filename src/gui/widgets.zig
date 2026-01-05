@@ -402,6 +402,31 @@ pub fn drawSpinner(x: i32, y: i32, radius: f32) void {
     }
 }
 
+/// Draw a small badge/pill with text
+pub fn drawBadge(text: [:0]const u8, x: i32, y: i32, color: rl.Color) void {
+    const font_size = theme.fonts.small;
+    const text_w = measureTextEx(text, font_size);
+    const padding_x: i32 = 6;
+    const padding_y: i32 = 2;
+    const badge_w: i32 = @as(i32, @intFromFloat(text_w)) + padding_x * 2;
+    const badge_h: i32 = @as(i32, @intFromFloat(font_size)) + padding_y * 2;
+
+    // Background with transparency
+    var bg_color = color;
+    bg_color.a = 40;
+
+    const rec = rl.Rectangle{
+        .x = @floatFromInt(x),
+        .y = @floatFromInt(y),
+        .width = @floatFromInt(badge_w),
+        .height = @floatFromInt(badge_h),
+    };
+    rl.drawRectangleRounded(rec, 0.5, 4, bg_color);
+
+    // Text
+    drawLabel(text, x + padding_x, y + padding_y, font_size, color);
+}
+
 /// Draw confirmation dialog
 pub fn drawConfirmDialog(title: [:0]const u8, message: [:0]const u8, screen_w: i32, screen_h: i32) ?bool {
     const dialog_w: i32 = 420;

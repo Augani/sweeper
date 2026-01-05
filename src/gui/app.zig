@@ -21,7 +21,13 @@ pub const FileItem = struct {
     category: analyzer.FileCategory,
     selected: bool,
     confidence: f32,
-    atime: i64, // Added for "Unused for X days"
+    mtime: i128, // Last modification time (nanoseconds)
+    days_old: u32, // Days since last modification
+
+    /// Check if this item is considered stale (default 90 days)
+    pub fn isStale(self: FileItem, threshold_days: u32) bool {
+        return self.days_old >= threshold_days;
+    }
 };
 
 /// Tab filter enum
@@ -326,6 +332,8 @@ pub const GuiApp = struct {
 
     /// Parse found paths from command output
     fn parseFoundPaths(self: *GuiApp, stdout: []const u8) void {
+        const now_ns = std.time.nanoTimestamp();
+
         var lines = std.mem.splitScalar(u8, stdout, '\n');
         while (lines.next()) |line| {
             // Trim carriage return for Windows
@@ -347,14 +355,43 @@ pub const GuiApp = struct {
             else
                 .dev_artifact;
 
+            // Get modification time and calculate age
+            var mtime: i128 = 0;
+            var days_old: u32 = 0;
+
+            if (std.fs.openDirAbsolute(path, .{})) |dir| {
+                var d = dir;
+                defer d.close();
+                if (d.stat()) |stat| {
+                    mtime = stat.mtime;
+                    // Calculate days since last modification
+                    const age_ns = now_ns - mtime;
+                    if (age_ns > 0) {
+                        const ns_per_day: i128 = 24 * 60 * 60 * 1_000_000_000;
+                        days_old = @intCast(@divTrunc(age_ns, ns_per_day));
+                    }
+                } else |_| {}
+            } else |_| {}
+
+            // Set confidence based on category and age
+            const confidence: f32 = if (category == .cache or category == .temporary)
+                0.95
+            else if (days_old > 90)
+                0.90 // Stale dev artifacts are safer to delete
+            else if (days_old > 30)
+                0.80
+            else
+                0.70; // Active projects, lower confidence
+
             self.files.append(self.allocator, FileItem{
                 .path = path,
                 .name = name,
                 .size = 0,
                 .category = category,
                 .selected = false,
-                .confidence = 0.9,
-                .atime = 0,
+                .confidence = confidence,
+                .mtime = mtime,
+                .days_old = days_old,
             }) catch {
                 self.allocator.free(path);
                 continue;
@@ -603,14 +640,35 @@ pub const GuiApp = struct {
             return;
         };
 
+        // Get modification time and calculate age
+        const now_ns = std.time.nanoTimestamp();
+        var mtime: i128 = 0;
+        var days_old: u32 = 0;
+
+        if (std.fs.openDirAbsolute(owned_path, .{})) |dir| {
+            var d = dir;
+            defer d.close();
+            if (d.stat()) |stat| {
+                mtime = stat.mtime;
+                const age_ns = now_ns - mtime;
+                if (age_ns > 0) {
+                    const ns_per_day: i128 = 24 * 60 * 60 * 1_000_000_000;
+                    days_old = @intCast(@divTrunc(age_ns, ns_per_day));
+                }
+            } else |_| {}
+        } else |_| {}
+
+        const confidence: f32 = if (category == .temporary) 0.98 else 0.85;
+
         self.files.append(self.allocator, FileItem{
             .path = owned_path,
             .name = std.fs.path.basename(owned_path),
             .size = 0,
             .category = category,
             .selected = false,
-            .confidence = 0.85,
-            .atime = 0,
+            .confidence = confidence,
+            .mtime = mtime,
+            .days_old = days_old,
         }) catch {
             self.allocator.free(owned_path);
         };
@@ -624,14 +682,41 @@ pub const GuiApp = struct {
             return;
         };
 
+        // Get modification time and calculate age
+        const now_ns = std.time.nanoTimestamp();
+        var mtime: i128 = 0;
+        var days_old: u32 = 0;
+
+        if (std.fs.openDirAbsolute(full_path, .{})) |dir| {
+            var d = dir;
+            defer d.close();
+            if (d.stat()) |stat| {
+                mtime = stat.mtime;
+                const age_ns = now_ns - mtime;
+                if (age_ns > 0) {
+                    const ns_per_day: i128 = 24 * 60 * 60 * 1_000_000_000;
+                    days_old = @intCast(@divTrunc(age_ns, ns_per_day));
+                }
+            } else |_| {}
+        } else |_| {}
+
+        // Higher confidence for caches/temp
+        const confidence: f32 = if (category == .cache or category == .temporary)
+            0.95
+        else if (category == .log)
+            0.90
+        else
+            0.85;
+
         self.files.append(self.allocator, FileItem{
             .path = full_path,
             .name = std.fs.path.basename(full_path),
             .size = 0,
             .category = category,
             .selected = false,
-            .confidence = 0.85,
-            .atime = 0,
+            .confidence = confidence,
+            .mtime = mtime,
+            .days_old = days_old,
         }) catch {
             self.allocator.free(full_path);
         };
@@ -740,8 +825,49 @@ pub const GuiApp = struct {
     }
 
     pub fn handleInput(self: *GuiApp) void {
+        // Q - Quit
         if (rl.isKeyPressed(.q)) self.should_quit = true;
-        // Scroll
+
+        // Esc - Cancel dialog or clear selection
+        if (rl.isKeyPressed(.escape)) {
+            if (self.dialog != .none) {
+                self.dialog = .none;
+            } else if (self.selected_count > 0) {
+                // Deselect all
+                for (self.files.items) |*file| {
+                    file.selected = false;
+                }
+                self.updateSelectionStats();
+            }
+        }
+
+        // R - Rescan
+        if (rl.isKeyPressed(.r) and self.view != .scanning and self.dialog == .none) {
+            self.startScan();
+        }
+
+        // A - Select/Deselect All (in current filter)
+        if (rl.isKeyPressed(.a) and self.view == .results and self.dialog == .none) {
+            self.toggleSelectAll();
+        }
+
+        // D - Delete selected
+        if (rl.isKeyPressed(.d) and self.selected_count > 0 and self.dialog == .none) {
+            self.dialog = .confirm_delete;
+        }
+
+        // Enter - Confirm delete in dialog
+        if (rl.isKeyPressed(.enter) and self.dialog == .confirm_delete) {
+            self.performDeletion();
+            self.dialog = .none;
+        }
+
+        // Z - Undo last deletion (Ctrl+Z would be nice but we'll use just Z)
+        if (rl.isKeyPressed(.z) and self.view == .results and self.dialog == .none) {
+            self.performUndo();
+        }
+
+        // Scroll with mouse wheel
         const wheel = rl.getMouseWheelMove();
         if (wheel != 0 and self.filtered_indices.items.len > 0) {
             const speed: i32 = 3;
@@ -749,6 +875,144 @@ pub const GuiApp = struct {
             const max_rows: usize = @intCast(@divTrunc(rl.getScreenHeight() - theme.dimensions.header_height, theme.dimensions.row_height)); // approx
             const max_scroll = if (self.filtered_indices.items.len > max_rows) self.filtered_indices.items.len - max_rows else 0;
             self.scroll_offset = @intCast(@max(0, @min(new_off, @as(i32, @intCast(max_scroll)))));
+        }
+    }
+
+    /// Perform deletion of selected items
+    fn performDeletion(self: *GuiApp) void {
+        // Initialize deleter if not already
+        if (self.file_deleter == null) {
+            const d = self.allocator.create(deleter.Deleter) catch return;
+            d.* = deleter.Deleter.init(self.allocator, .{
+                .use_trash = true,
+                .dry_run = false,
+                .require_confirmation = false, // We already confirmed in GUI
+                .verbose_logging = false,
+            }) catch {
+                self.allocator.destroy(d);
+                return;
+            };
+            self.file_deleter = d;
+        }
+
+        // Collect paths of selected items
+        var paths_to_delete: std.ArrayListUnmanaged([]const u8) = .{};
+        defer paths_to_delete.deinit(self.allocator);
+
+        for (self.files.items) |file| {
+            if (file.selected) {
+                paths_to_delete.append(self.allocator, file.path) catch continue;
+            }
+        }
+
+        if (paths_to_delete.items.len == 0) return;
+
+        // Perform deletion
+        self.view = .deleting;
+        self.delete_progress = 0;
+
+        const results = self.file_deleter.?.deleteFiles(paths_to_delete.items) catch {
+            self.view = .results;
+            self.status_message = "Deletion failed";
+            return;
+        };
+        defer self.allocator.free(results);
+
+        // Calculate freed space and count successes
+        var freed: u64 = 0;
+        var success_count: usize = 0;
+        for (results) |result| {
+            if (result.success) {
+                freed += result.bytes_freed;
+                success_count += 1;
+            }
+        }
+
+        // Remove successfully deleted items from the list
+        var i: usize = 0;
+        while (i < self.files.items.len) {
+            const file = &self.files.items[i];
+            if (file.selected) {
+                // Check if this file was successfully deleted
+                var was_deleted = false;
+                for (results) |result| {
+                    if (result.success and std.mem.eql(u8, result.path, file.path)) {
+                        was_deleted = true;
+                        break;
+                    }
+                }
+
+                if (was_deleted) {
+                    self.allocator.free(file.path);
+                    _ = self.files.orderedRemove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        // Update stats
+        self.total_size -= freed;
+        self.selected_count = 0;
+        self.selected_size = 0;
+        self.updateFilteredList();
+        self.view = .results;
+        self.status_message = "Deletion complete";
+    }
+
+    /// Undo last deletion
+    fn performUndo(self: *GuiApp) void {
+        if (self.file_deleter == null) return;
+
+        const result = self.file_deleter.?.undo() catch return;
+        if (result) |undo_result| {
+            defer {
+                var r = undo_result;
+                r.deinit(self.allocator);
+            }
+
+            if (undo_result.success) {
+                // Re-scan to pick up restored file
+                self.status_message = "Undo successful - file restored";
+            } else {
+                self.status_message = "Undo failed";
+            }
+        }
+    }
+
+    /// Delete a single item by index
+    fn deleteSingleItem(self: *GuiApp, idx: usize) void {
+        if (idx >= self.files.items.len) return;
+
+        // Initialize deleter if needed
+        if (self.file_deleter == null) {
+            const d = self.allocator.create(deleter.Deleter) catch return;
+            d.* = deleter.Deleter.init(self.allocator, .{
+                .use_trash = true,
+                .dry_run = false,
+                .require_confirmation = false,
+                .verbose_logging = false,
+            }) catch {
+                self.allocator.destroy(d);
+                return;
+            };
+            self.file_deleter = d;
+        }
+
+        const file = &self.files.items[idx];
+        var result = self.file_deleter.?.deleteFile(file.path) catch return;
+        defer result.deinit(self.allocator);
+
+        if (result.success) {
+            // Update stats
+            self.total_size -= result.bytes_freed;
+            self.category_sizes[@intFromEnum(file.category)] -= @min(result.bytes_freed, self.category_sizes[@intFromEnum(file.category)]);
+
+            // Remove from list
+            self.allocator.free(file.path);
+            _ = self.files.orderedRemove(idx);
+            self.updateFilteredList();
+            self.status_message = "Item deleted";
         }
     }
 
@@ -789,7 +1053,24 @@ pub const GuiApp = struct {
         
         // Dialogs
         if (self.dialog == .confirm_delete) {
-             // render confirmation
+            // Format message with count and size
+            var msg_buf: [128]u8 = undefined;
+            var size_buf: [32]u8 = undefined;
+            const size_str = widgets.formatSizeBuffer(self.selected_size, &size_buf);
+
+            const msg = std.fmt.bufPrint(&msg_buf, "Delete {d} items ({s})? This will move them to trash.", .{ self.selected_count, size_str }) catch "Delete selected items?";
+
+            var msg_z: [128:0]u8 = undefined;
+            @memcpy(msg_z[0..msg.len], msg);
+            msg_z[msg.len] = 0;
+
+            const result = widgets.drawConfirmDialog("Confirm Delete", &msg_z, sw, sh);
+            if (result) |confirmed| {
+                if (confirmed) {
+                    self.performDeletion();
+                }
+                self.dialog = .none;
+            }
         }
     }
 
@@ -978,17 +1259,18 @@ pub const GuiApp = struct {
             const idx = self.filtered_indices.items[i];
             const file = &self.files.items[idx];
 
-            // Row background highlight if selected
-            if (file.selected) {
+            // Row background highlight if selected or stale
+            const is_stale = file.isStale(90);
+            if (file.selected or is_stale) {
                 const row_rec = rl.Rectangle{
                     .x = @floatFromInt(list_x + 10),
                     .y = @floatFromInt(curr_y),
                     .width = @floatFromInt(list_w - 20),
                     .height = @floatFromInt(row_h - 5),
                 };
-                var sel_color = theme.colors.success;
-                sel_color.a = 20;
-                rl.drawRectangleRounded(row_rec, 0.1, 4, sel_color);
+                var bg_color = if (file.selected) theme.colors.success else theme.colors.warning;
+                bg_color.a = if (file.selected) 20 else 10;
+                rl.drawRectangleRounded(row_rec, 0.1, 4, bg_color);
             }
 
             // Checkbox for selection
@@ -997,33 +1279,81 @@ pub const GuiApp = struct {
                 self.updateSelectionStats();
             }
 
-            // Path
+            // Name
             var name_buf: [256:0]u8 = undefined;
             const name_len = @min(file.name.len, 255);
             @memcpy(name_buf[0..name_len], file.name[0..name_len]);
             name_buf[name_len] = 0;
-            widgets.drawLabel(&name_buf, list_x + 55, curr_y + 15, theme.fonts.body, theme.colors.text_primary);
+            widgets.drawLabel(&name_buf, list_x + 55, curr_y + 10, theme.fonts.body, theme.colors.text_primary);
 
-            // Subtitle path/unused info
-            const path_trunc = if (file.path.len > 40) file.path[file.path.len-40..] else file.path;
+            // Confidence badge (right after name)
+            const conf_pct = @as(u32, @intFromFloat(file.confidence * 100));
+            var conf_buf: [8:0]u8 = undefined;
+            const conf_str = std.fmt.bufPrint(&conf_buf, "{d}%", .{conf_pct}) catch "??%";
+            conf_buf[conf_str.len] = 0;
+
+            // Confidence badge color based on value
+            const conf_color = if (file.confidence >= 0.90)
+                theme.colors.success
+            else if (file.confidence >= 0.70)
+                theme.colors.warning
+            else
+                theme.colors.danger;
+
+            // Draw small confidence badge
+            const name_width = @as(i32, @intFromFloat(widgets.measureTextEx(&name_buf, theme.fonts.body)));
+            widgets.drawBadge(conf_buf[0..conf_str.len :0], list_x + 60 + name_width, curr_y + 10, conf_color);
+
+            // Subtitle: path + stale indicator
+            const path_trunc = if (file.path.len > 35) file.path[file.path.len - 35 ..] else file.path;
             var sub_buf: [128]u8 = undefined;
-            const sub = std.fmt.bufPrint(&sub_buf, "{s}", .{ path_trunc }) catch "";
-            var sub_z: [128:0]u8 = undefined; @memcpy(sub_z[0..sub.len], sub); sub_z[sub.len] = 0;
+            const sub = if (is_stale)
+                std.fmt.bufPrint(&sub_buf, "...{s}  [{d} days old]", .{ path_trunc, file.days_old }) catch ""
+            else if (file.days_old > 0)
+                std.fmt.bufPrint(&sub_buf, "...{s}  [{d}d]", .{ path_trunc, file.days_old }) catch ""
+            else
+                std.fmt.bufPrint(&sub_buf, "...{s}", .{path_trunc}) catch "";
+            var sub_z: [128:0]u8 = undefined;
+            @memcpy(sub_z[0..sub.len], sub);
+            sub_z[sub.len] = 0;
 
-            widgets.drawLabel(&sub_z, list_x + 55, curr_y + 38, theme.fonts.small, theme.colors.text_muted);
+            const sub_color = if (is_stale) theme.colors.warning else theme.colors.text_muted;
+            widgets.drawLabel(&sub_z, list_x + 55, curr_y + 32, theme.fonts.small, sub_color);
 
-            // Size
+            // Category badge
+            const cat_label: [:0]const u8 = switch (file.category) {
+                .dev_artifact => "Dev",
+                .cache => "Cache",
+                .temporary => "Temp",
+                .log => "Log",
+                .large => "Large",
+                .browser_data => "Browser",
+                else => "Other",
+            };
+            const cat_color = switch (file.category) {
+                .dev_artifact => theme.colors.chart_1,
+                .cache => theme.colors.chart_2,
+                .temporary => theme.colors.chart_3,
+                .log => theme.colors.chart_4,
+                .browser_data => theme.colors.chart_5,
+                else => theme.colors.text_muted,
+            };
+            widgets.drawBadge(cat_label, list_x + 55, curr_y + 50, cat_color);
+
+            // Size (right side)
             var sz_buf: [32]u8 = undefined;
             const sz_s = widgets.formatSizeBuffer(file.size, &sz_buf);
-            var sz_z: [32:0]u8 = undefined; @memcpy(sz_z[0..sz_s.len], sz_s); sz_z[sz_s.len] = 0;
+            var sz_z: [32:0]u8 = undefined;
+            @memcpy(sz_z[0..sz_s.len], sz_s);
+            sz_z[sz_s.len] = 0;
             const sz_w = widgets.measureTextEx(&sz_z, theme.fonts.body);
-            widgets.drawLabel(&sz_z, list_x + list_w - 120 - @as(i32, @intFromFloat(sz_w)), curr_y + 25, theme.fonts.body, theme.colors.text_primary);
+            widgets.drawLabel(&sz_z, list_x + list_w - 100 - @as(i32, @intFromFloat(sz_w)), curr_y + 25, theme.fonts.body, theme.colors.text_primary);
 
-            // Delete Action (single item)
+            // Delete Action (single item) - store idx for deletion
             if (widgets.drawIconButton("X", list_x + list_w - 55, curr_y + 20, 30, theme.colors.danger)) {
-                // Single item delete logic
+                self.deleteSingleItem(idx);
             }
-            
+
             curr_y += row_h;
         }
         rl.endScissorMode();

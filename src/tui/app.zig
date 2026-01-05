@@ -637,7 +637,7 @@ pub const App = struct {
     /// Draw title bar
     fn drawTitleBar(self: *App, buf: *Buffer, area: Rect) void {
         _ = self;
-        const title = " Desktop Cleanup TUI ";
+        const title = " Sweeper ";
         buf.drawHLine(area.x, area.y, area.width, ' ', Style.default.withBg(.blue).withFg(.white));
         buf.drawString(area.x + (area.width - @as(u16, @intCast(title.len))) / 2, area.y, title, Style.default.withBg(.blue).withFg(.white).withBold());
     }
