@@ -1,0 +1,5 @@
+{
+  "name": "Sweeper",
+  "description": "The most powerful open-source deep cleaning tool for developers. Reclaim your disk space from node_modules, cache, and dev artifacts.",
+  "requestFramePermissions": []
+}
