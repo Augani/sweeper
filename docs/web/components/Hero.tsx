@@ -13,7 +13,7 @@ const Hero: React.FC = () => {
         className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 border border-red-100 mb-8 backdrop-blur-sm"
       >
         <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
-        <span className="text-xs font-medium text-red-600 tracking-wide uppercase">v2.0 Now Available</span>
+        <span className="text-xs font-medium text-red-600 tracking-wide uppercase">v0.1.0 Now Available</span>
       </motion.div>
 
       <motion.h1
