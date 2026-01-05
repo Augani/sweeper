@@ -82,8 +82,17 @@ jobs:
           mkdir -p sweeper-${{ matrix.name }}
           cp zig-out/bin/sweeper sweeper-${{ matrix.name }}/ || true
           cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
-          cp -r resources sweeper-${{ matrix.name }}/ || true
+          # Copy resources from build output (preferred) or project root
+          if [ -d "zig-out/bin/resources" ]; then
+            cp -r zig-out/bin/resources sweeper-${{ matrix.name }}/
+          else
+            cp -r resources sweeper-${{ matrix.name }}/
+          fi
           cp README.md LICENSE sweeper-${{ matrix.name }}/
+          # Verify package contents
+          echo "Package contents:"
+          ls -la sweeper-${{ matrix.name }}/
+          ls -la sweeper-${{ matrix.name }}/resources/ || echo "No resources folder!"
           tar -czvf sweeper-${{ matrix.name }}.${{ matrix.ext }} sweeper-${{ matrix.name }}
 
       - name: Package (Windows)
@@ -93,8 +102,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path sweeper-${{ matrix.name }}
           Copy-Item zig-out/bin/sweeper.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
           Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
-          Copy-Item -Recurse resources sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          # Copy resources from build output (preferred) or project root
+          if (Test-Path "zig-out/bin/resources") {
+            Copy-Item -Recurse zig-out/bin/resources sweeper-${{ matrix.name }}/
+          } else {
+            Copy-Item -Recurse resources sweeper-${{ matrix.name }}/
+          }
           Copy-Item README.md,LICENSE sweeper-${{ matrix.name }}/
+          # Verify package contents
+          Write-Host "Package contents:"
+          Get-ChildItem sweeper-${{ matrix.name }}/
+          Get-ChildItem sweeper-${{ matrix.name }}/resources/
           Compress-Archive -Path sweeper-${{ matrix.name }} -DestinationPath sweeper-${{ matrix.name }}.${{ matrix.ext }}
 
       - name: Upload artifact
