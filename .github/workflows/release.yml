@@ -62,12 +62,8 @@ jobs:
           unzip -q zig.zip
           echo "$PWD/zig-x86_64-windows-0.15.2" >> $GITHUB_PATH
 
-      - name: Build CLI
-        run: zig build sweeper -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
-
-      - name: Build GUI
-        run: zig build sweeper-gui -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
-        continue-on-error: true
+      - name: Build
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
