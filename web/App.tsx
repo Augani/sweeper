@@ -61,7 +61,7 @@ const App: React.FC = () => {
                 </a>
               </div>
               <p className="mt-6 text-sm text-gray-500 relative z-10">
-                Available for macOS, Linux, and Windows • GUI (~2MB) • CLI (~660KB)
+                Available for macOS, Linux, and Windows • GUI (~1MB) • CLI (~633KB)
               </p>
             </div>
           </section>

@@ -13,7 +13,7 @@ const Hero: React.FC = () => {
         className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 border border-red-100 mb-8 backdrop-blur-sm"
       >
         <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
-        <span className="text-xs font-medium text-red-600 tracking-wide uppercase">v2.0 Now Available</span>
+        <span className="text-xs font-medium text-red-600 tracking-wide uppercase">v0.1.0 Now Available</span>
       </motion.div>
 
       <motion.h1
@@ -46,14 +46,14 @@ const Hero: React.FC = () => {
         transition={{ duration: 0.5, delay: 0.3 }}
         className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto"
       >
-        <button className="w-full sm:w-auto px-8 py-4 bg-primary text-white text-lg font-bold rounded-full hover:scale-105 transition-transform flex items-center justify-center gap-2 shadow-xl shadow-red-500/20 hover:bg-red-700">
+        <a href="https://github.com/Augani/sweeper/releases" className="w-full sm:w-auto px-8 py-4 bg-primary text-white text-lg font-bold rounded-full hover:scale-105 transition-transform flex items-center justify-center gap-2 shadow-xl shadow-red-500/20 hover:bg-red-700">
           <Download className="w-5 h-5" />
           Download Free
-        </button>
-        <button className="w-full sm:w-auto px-8 py-4 bg-white border border-zinc-200 text-zinc-900 text-lg font-bold rounded-full hover:bg-zinc-50 transition-colors flex items-center justify-center gap-2 shadow-sm">
+        </a>
+        <a href="https://github.com/Augani/sweeper" className="w-full sm:w-auto px-8 py-4 bg-white border border-zinc-200 text-zinc-900 text-lg font-bold rounded-full hover:bg-zinc-50 transition-colors flex items-center justify-center gap-2 shadow-sm">
           <Terminal className="w-5 h-5 text-zinc-500" />
-          <span>npm install -g sweeper</span>
-        </button>
+          <span>View on GitHub</span>
+        </a>
       </motion.div>
 
       <motion.div
@@ -62,7 +62,7 @@ const Hero: React.FC = () => {
         transition={{ duration: 1, delay: 0.8 }}
         className="mt-12 text-sm text-zinc-500"
       >
-        Trusted by 10k+ developers • Open Source (MIT)
+        Built with Zig • Open Source (MIT) • macOS, Linux & Windows
       </motion.div>
     </section>
   );

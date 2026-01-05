@@ -198,15 +198,18 @@ pub fn drawButton(text: [:0]const u8, x: i32, y: i32, w: i32, h: i32, style: the
 
     // Background
     const bg_color = if (pressed) style.bg_active else if (hovered) style.bg_hover else style.bg;
-    
+
     const rec = rl.Rectangle{
         .x = @floatFromInt(x),
         .y = @floatFromInt(y),
         .width = @floatFromInt(w),
         .height = @floatFromInt(h)
     };
-    
-    rl.drawRectangleRounded(rec, theme.dimensions.button_radius / @as(f32, @floatFromInt(@min(w, h))), 8, bg_color);
+
+    // Calculate roundness safely (clamp to valid range 0.0-1.0)
+    const min_dim = @as(f32, @floatFromInt(@max(1, @min(w, h))));
+    const roundness = @min(1.0, @max(0.0, theme.dimensions.button_radius / min_dim));
+    rl.drawRectangleRounded(rec, roundness, 8, bg_color);
 
     // Text (centered) - Buttons usually use SemiBold
     const text_measured = measureTextStrong(text, theme.fonts.body);

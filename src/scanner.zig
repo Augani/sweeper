@@ -506,7 +506,7 @@ pub const Scanner = struct {
             .is_readonly = attrs.is_readonly,
             .is_executable = attrs.is_executable,
             .extension = null,
-            .mode = stat.mode,
+            .mode = @intCast(stat.mode),
             .inode = @bitCast(stat.inode), // Handle i64 -> u64 on Windows
             .attributes = attrs,
         };
@@ -565,7 +565,7 @@ pub const Scanner = struct {
             .is_readonly = attrs.is_readonly,
             .is_executable = attrs.is_executable,
             .extension = extension,
-            .mode = stat.mode,
+            .mode = @intCast(stat.mode),
             .inode = @bitCast(stat.inode), // Handle i64 -> u64 on Windows
             .attributes = attrs,
         };
@@ -722,7 +722,7 @@ pub fn quickScan(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(
             .is_readonly = attrs.is_readonly,
             .is_executable = attrs.is_executable,
             .extension = getFileExtension(entry.name),
-            .mode = stat.mode,
+            .mode = @intCast(stat.mode),
             .inode = stat.inode,
             .attributes = attrs,
         };
@@ -805,7 +805,7 @@ pub fn quickScanFiltered(allocator: std.mem.Allocator, path: []const u8, opts: Q
             .is_readonly = attrs.is_readonly,
             .is_executable = attrs.is_executable,
             .extension = getFileExtension(entry.name),
-            .mode = stat.mode,
+            .mode = @intCast(stat.mode),
             .inode = stat.inode,
             .attributes = attrs,
         };

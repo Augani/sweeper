@@ -6,12 +6,12 @@ const Stats: React.FC = () => {
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="text-center">
-            <div className="text-4xl md:text-5xl font-bold text-zinc-900 mb-2 font-display">347 GB</div>
-            <div className="text-sm text-zinc-500 uppercase tracking-wider font-medium">Avg Space Recovered</div>
+            <div className="text-4xl md:text-5xl font-bold text-zinc-900 mb-2 font-display">~1 MB</div>
+            <div className="text-sm text-zinc-500 uppercase tracking-wider font-medium">GUI Binary Size</div>
           </div>
           <div className="text-center">
-            <div className="text-4xl md:text-5xl font-bold text-zinc-900 mb-2 font-display">2.4s</div>
-            <div className="text-sm text-zinc-500 uppercase tracking-wider font-medium">Scan Time (1TB)</div>
+            <div className="text-4xl md:text-5xl font-bold text-zinc-900 mb-2 font-display">~630 KB</div>
+            <div className="text-sm text-zinc-500 uppercase tracking-wider font-medium">TUI Binary Size</div>
           </div>
           <div className="text-center">
             <div className="text-4xl md:text-5xl font-bold text-zinc-900 mb-2 font-display">100%</div>

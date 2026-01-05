@@ -102,7 +102,8 @@ pub const GuiApp = struct {
     selected_size: u64,
     scan_progress: f32,
     status_message: []const u8,
-    
+    status_buf: [128]u8, // Buffer for formatted status messages
+
     // Chart stats
     category_sizes: [10]u64,
 
@@ -142,6 +143,7 @@ pub const GuiApp = struct {
             .selected_size = 0,
             .scan_progress = 0,
             .status_message = "Ready to scan",
+            .status_buf = [_]u8{0} ** 128,
             .category_sizes = [_]u64{0} ** 10,
             .file_deleter = null,
             .delete_progress = 0,
@@ -534,12 +536,12 @@ pub const GuiApp = struct {
         };
 
         // macOS-specific paths
+        // Note: We only scan specific subfolders, NOT parent folders like ~/Library/Caches
+        // because the parent contains system caches that can't be deleted
         const macos_paths = [_]struct { suffix: []const u8, category: analyzer.FileCategory }{
-            // System
-            .{ .suffix = "/Library/Caches", .category = .cache },
-            .{ .suffix = "/Library/Logs", .category = .log },
+            // Trash
             .{ .suffix = "/.Trash", .category = .temporary },
-            // Xcode & iOS
+            // Xcode & iOS Development
             .{ .suffix = "/Library/Developer/Xcode/DerivedData", .category = .dev_artifact },
             .{ .suffix = "/Library/Developer/Xcode/Archives", .category = .dev_artifact },
             .{ .suffix = "/Library/Developer/CoreSimulator/Caches", .category = .cache },
@@ -550,16 +552,20 @@ pub const GuiApp = struct {
             .{ .suffix = "/Library/Application Support/Code/CachedExtensionVSIXs", .category = .cache },
             .{ .suffix = "/Library/Application Support/Code/Cache", .category = .cache },
             .{ .suffix = "/Library/Application Support/Code/CachedData", .category = .cache },
-            // Browsers
+            // Browsers (specific app caches, not system caches)
             .{ .suffix = "/Library/Caches/Google/Chrome", .category = .browser_data },
             .{ .suffix = "/Library/Caches/com.apple.Safari", .category = .browser_data },
             .{ .suffix = "/Library/Caches/Firefox", .category = .browser_data },
-            // JetBrains on macOS
+            .{ .suffix = "/Library/Caches/org.mozilla.firefox", .category = .browser_data },
+            // JetBrains IDEs
             .{ .suffix = "/Library/Caches/JetBrains", .category = .cache },
-            // Homebrew
+            // Package managers
             .{ .suffix = "/Library/Caches/Homebrew", .category = .cache },
-            // Pip on macOS
             .{ .suffix = "/Library/Caches/pip", .category = .cache },
+            .{ .suffix = "/Library/Caches/yarn", .category = .cache },
+            // npm/node
+            .{ .suffix = "/.npm", .category = .cache },
+            .{ .suffix = "/.node-gyp", .category = .cache },
         };
 
         // Linux-specific paths
@@ -995,19 +1001,29 @@ pub const GuiApp = struct {
             self.status_message = "Deletion failed";
             return;
         };
-        defer self.allocator.free(results);
+        defer {
+            // Free each result's allocated strings, then free the array
+            for (results) |*result| {
+                var r = result.*;
+                r.deinit(self.allocator);
+            }
+            self.allocator.free(results);
+        }
 
-        // Calculate freed space and count successes
+        // Calculate freed space and count successes/failures
         var freed: u64 = 0;
         var success_count: usize = 0;
+        var fail_count: usize = 0;
         for (results) |result| {
             if (result.success) {
                 freed += result.bytes_freed;
                 success_count += 1;
+            } else {
+                fail_count += 1;
             }
         }
 
-        // Remove successfully deleted items from the list
+        // Remove successfully deleted items from the list, deselect failed items
         var i: usize = 0;
         while (i < self.files.items.len) {
             const file = &self.files.items[i];
@@ -1015,8 +1031,8 @@ pub const GuiApp = struct {
                 // Check if this file was successfully deleted
                 var was_deleted = false;
                 for (results) |result| {
-                    if (result.success and std.mem.eql(u8, result.path, file.path)) {
-                        was_deleted = true;
+                    if (std.mem.eql(u8, result.path, file.path)) {
+                        was_deleted = result.success;
                         break;
                     }
                 }
@@ -1025,6 +1041,9 @@ pub const GuiApp = struct {
                     self.allocator.free(file.path);
                     _ = self.files.orderedRemove(i);
                     continue;
+                } else {
+                    // Deselect failed items so user can try again or skip them
+                    file.selected = false;
                 }
             }
             i += 1;
@@ -1036,7 +1055,17 @@ pub const GuiApp = struct {
         self.selected_size = 0;
         self.updateFilteredList();
         self.view = .results;
-        self.status_message = "Deletion complete";
+
+        // Show appropriate status message
+        if (fail_count == 0) {
+            self.status_message = "Deletion complete";
+        } else if (success_count == 0) {
+            self.status_message = "Deletion failed - permission denied";
+        } else {
+            // Some succeeded, some failed - format a message
+            const msg = std.fmt.bufPrint(&self.status_buf, "{d} deleted, {d} failed (permission denied)", .{ success_count, fail_count }) catch "Partial deletion";
+            self.status_message = msg;
+        }
     }
 
     /// Undo last deletion
@@ -1213,16 +1242,37 @@ pub const GuiApp = struct {
     fn renderHeader(self: *GuiApp, x: i32, w: i32) void {
          const h = theme.dimensions.header_height;
          // rl.drawRectangle(x, 0, w, h, theme.colors.background); // Already bg
-         
+
          const title = "System Scan";
          widgets.drawTitle(title, x + 30, @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.title)), 2), theme.fonts.title, theme.colors.text_primary);
-         
+
+         // Status message (shown next to title)
+         if (self.status_message.len > 0 and !std.mem.eql(u8, self.status_message, "Ready to scan")) {
+             var status_buf: [128:0]u8 = undefined;
+             const len = @min(self.status_message.len, 127);
+             @memcpy(status_buf[0..len], self.status_message[0..len]);
+             status_buf[len] = 0;
+
+             // Show status with appropriate color
+             const status_color = if (std.mem.indexOf(u8, self.status_message, "complete") != null or
+                                      std.mem.indexOf(u8, self.status_message, "deleted") != null or
+                                      std.mem.indexOf(u8, self.status_message, "successful") != null)
+                 theme.colors.success
+             else if (std.mem.indexOf(u8, self.status_message, "failed") != null)
+                 theme.colors.danger
+             else
+                 theme.colors.text_secondary;
+
+             const title_w = @as(i32, @intFromFloat(widgets.measureTextEx(title, theme.fonts.title)));
+             widgets.drawLabel(&status_buf, x + 30 + title_w + 20, @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.body)), 2) + 4, theme.fonts.body, status_color);
+         }
+
          // Rescan Button (Primary Red)
          const btn_w = 120;
          const btn_h = 36;
          const btn_x = x + w - btn_w - 30;
          const btn_y = @divTrunc(h - btn_h, 2);
-         
+
          if (widgets.drawButton("Rescan", btn_x, btn_y, btn_w, btn_h, theme.ButtonStyle.primary)) {
              self.startScan();
          }

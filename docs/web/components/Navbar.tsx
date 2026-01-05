@@ -28,12 +28,12 @@ const Navbar: React.FC = () => {
           <a href="#how-it-works" className="text-sm font-medium text-zinc-600 hover:text-primary transition-colors">How it works</a>
           <a href="#stats" className="text-sm font-medium text-zinc-600 hover:text-primary transition-colors">Impact</a>
           <div className="w-px h-4 bg-zinc-200"></div>
-          <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-primary transition-colors">
+          <a href="https://github.com/Augani/sweeper" target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-primary transition-colors">
             <Github className="w-5 h-5" />
           </a>
-          <button className="px-5 py-2 bg-zinc-900 text-white text-sm font-bold rounded-full hover:bg-zinc-800 transition-colors">
+          <a href="https://github.com/Augani/sweeper/releases" className="px-5 py-2 bg-zinc-900 text-white text-sm font-bold rounded-full hover:bg-zinc-800 transition-colors">
             Download
-          </button>
+          </a>
         </div>
 
         <button 
@@ -50,9 +50,9 @@ const Navbar: React.FC = () => {
           <a href="#features" className="text-sm font-medium text-zinc-600 hover:text-primary" onClick={() => setIsMobileMenuOpen(false)}>Features</a>
           <a href="#how-it-works" className="text-sm font-medium text-zinc-600 hover:text-primary" onClick={() => setIsMobileMenuOpen(false)}>How it works</a>
           <a href="#stats" className="text-sm font-medium text-zinc-600 hover:text-primary" onClick={() => setIsMobileMenuOpen(false)}>Impact</a>
-          <button className="w-full py-3 bg-primary text-white text-sm font-bold rounded-lg">
+          <a href="https://github.com/Augani/sweeper/releases" className="w-full py-3 bg-primary text-white text-sm font-bold rounded-lg text-center block">
             Download
-          </button>
+          </a>
         </div>
       )}
     </nav>

@@ -11,59 +11,121 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            target: aarch64-macos
             name: macos-arm64
             ext: tar.gz
-          - os: macos-15
-            target: x86_64-macos
-            name: macos-x64
-            ext: tar.gz
+            zig_url: https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz
+            zig_dir: zig-aarch64-macos-0.15.2
           - os: ubuntu-latest
-            target: x86_64-linux-gnu
             name: linux-x64
             ext: tar.gz
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+            zig_dir: zig-x86_64-linux-0.15.2
           - os: windows-latest
-            target: x86_64-windows-gnu
             name: windows-x64
             ext: zip
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip
+            zig_dir: zig-x86_64-windows-0.15.2
 
     runs-on: ${{ matrix.os }}
-    
+    timeout-minutes: 90
+
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v1
+
+      - name: Cache Zig
+        uses: actions/cache@v4
         with:
-          version: 0.15.0
-      
+          path: |
+            ${{ matrix.zig_dir }}
+          key: zig-0.15.2-${{ matrix.os }}
+
+      - name: Cache Zig build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .zig-cache
+            ~/.cache/zig
+          key: zig-build-${{ matrix.os }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            zig-build-${{ matrix.os }}-
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxext-dev libxfixes-dev libgl1-mesa-dev
+
+      - name: Setup Zig
+        shell: bash
+        run: |
+          if [ ! -d "${{ matrix.zig_dir }}" ]; then
+            if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+              curl -L -o zig.zip "${{ matrix.zig_url }}"
+              unzip -q zig.zip
+            else
+              curl -L "${{ matrix.zig_url }}" | tar -xJ
+            fi
+          fi
+          echo "$PWD/${{ matrix.zig_dir }}" >> $GITHUB_PATH
+
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
-      
+        shell: bash
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Sign macOS binaries (ad-hoc)
+        if: runner.os == 'macOS'
+        run: |
+          # Ad-hoc sign the binaries for macOS
+          # This helps with Gatekeeper on ARM64 Macs
+          codesign --force --deep --sign - zig-out/bin/sweeper || true
+          codesign --force --deep --sign - zig-out/bin/sweeper-gui || true
+          # Verify signatures
+          codesign -v zig-out/bin/sweeper || true
+          codesign -v zig-out/bin/sweeper-gui || true
+
       - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           mkdir -p sweeper-${{ matrix.name }}
-          cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
           cp zig-out/bin/sweeper sweeper-${{ matrix.name }}/ || true
-          cp -r resources sweeper-${{ matrix.name }}/ || true
+          cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
+          # Copy resources from build output (preferred) or project root
+          if [ -d "zig-out/bin/resources" ]; then
+            cp -r zig-out/bin/resources sweeper-${{ matrix.name }}/
+          else
+            cp -r resources sweeper-${{ matrix.name }}/
+          fi
           cp README.md LICENSE sweeper-${{ matrix.name }}/
+          # Verify package contents
+          echo "Package contents:"
+          ls -la sweeper-${{ matrix.name }}/
+          ls -la sweeper-${{ matrix.name }}/resources/ || echo "No resources folder!"
           tar -czvf sweeper-${{ matrix.name }}.${{ matrix.ext }} sweeper-${{ matrix.name }}
-      
+
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path sweeper-${{ matrix.name }}
-          Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
           Copy-Item zig-out/bin/sweeper.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
-          Copy-Item -Recurse resources sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          # Copy resources from build output (preferred) or project root
+          if (Test-Path "zig-out/bin/resources") {
+            Copy-Item -Recurse zig-out/bin/resources sweeper-${{ matrix.name }}/
+          } else {
+            Copy-Item -Recurse resources sweeper-${{ matrix.name }}/
+          }
           Copy-Item README.md,LICENSE sweeper-${{ matrix.name }}/
+          # Verify package contents
+          Write-Host "Package contents:"
+          Get-ChildItem sweeper-${{ matrix.name }}/
+          Get-ChildItem sweeper-${{ matrix.name }}/resources/
           Compress-Archive -Path sweeper-${{ matrix.name }} -DestinationPath sweeper-${{ matrix.name }}.${{ matrix.ext }}
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -73,15 +135,15 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

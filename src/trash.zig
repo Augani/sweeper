@@ -194,6 +194,9 @@ pub const TrashManager = struct {
                 else => "Failed to move file to trash",
             };
 
+            // Free dest_path since we're not using it in the result
+            self.allocator.free(dest_path);
+
             return TrashResult{
                 .success = false,
                 .trash_path = null,
