@@ -269,6 +269,8 @@ pub const Deleter = struct {
     fn moveToTrash(self: *Deleter, path: []const u8, file_size: u64) !DeleteResult {
         var trash_result = try self.trash_manager.trash(path);
         defer {
+            // Always free original_path - we already have the path in DeleteResult
+            self.allocator.free(trash_result.original_path);
             if (!trash_result.success) {
                 if (trash_result.trash_path) |p| self.allocator.free(p);
                 if (trash_result.error_message) |m| self.allocator.free(m);
