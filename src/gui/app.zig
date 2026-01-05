@@ -1213,16 +1213,37 @@ pub const GuiApp = struct {
     fn renderHeader(self: *GuiApp, x: i32, w: i32) void {
          const h = theme.dimensions.header_height;
          // rl.drawRectangle(x, 0, w, h, theme.colors.background); // Already bg
-         
+
          const title = "System Scan";
          widgets.drawTitle(title, x + 30, @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.title)), 2), theme.fonts.title, theme.colors.text_primary);
-         
+
+         // Status message (shown next to title)
+         if (self.status_message.len > 0 and !std.mem.eql(u8, self.status_message, "Ready to scan")) {
+             var status_buf: [128:0]u8 = undefined;
+             const len = @min(self.status_message.len, 127);
+             @memcpy(status_buf[0..len], self.status_message[0..len]);
+             status_buf[len] = 0;
+
+             // Show status with appropriate color
+             const status_color = if (std.mem.indexOf(u8, self.status_message, "complete") != null or
+                                      std.mem.indexOf(u8, self.status_message, "deleted") != null or
+                                      std.mem.indexOf(u8, self.status_message, "successful") != null)
+                 theme.colors.success
+             else if (std.mem.indexOf(u8, self.status_message, "failed") != null)
+                 theme.colors.danger
+             else
+                 theme.colors.text_secondary;
+
+             const title_w = @as(i32, @intFromFloat(widgets.measureTextEx(title, theme.fonts.title)));
+             widgets.drawLabel(&status_buf, x + 30 + title_w + 20, @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.body)), 2) + 4, theme.fonts.body, status_color);
+         }
+
          // Rescan Button (Primary Red)
          const btn_w = 120;
          const btn_h = 36;
          const btn_x = x + w - btn_w - 30;
          const btn_y = @divTrunc(h - btn_h, 2);
-         
+
          if (widgets.drawButton("Rescan", btn_x, btn_y, btn_w, btn_h, theme.ButtonStyle.primary)) {
              self.startScan();
          }

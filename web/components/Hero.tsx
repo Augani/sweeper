@@ -86,7 +86,7 @@ const Hero: React.FC = () => {
         transition={{ duration: 0.5, delay: 0.5 }}
         className="mt-4 text-sm text-zinc-400"
       >
-        GUI (~2MB) • CLI (~660KB) • Zero dependencies
+        GUI (~1MB) • CLI (~633KB) • Zero dependencies
       </motion.p>
 
       <motion.div
