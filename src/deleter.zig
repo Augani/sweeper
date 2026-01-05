@@ -166,23 +166,37 @@ pub const Deleter = struct {
         const owned_path = try self.allocator.dupe(u8, path);
         errdefer self.allocator.free(owned_path);
 
-        // Get file info for size first
-        const stat = std.fs.cwd().statFile(path) catch |err| {
-            if (self.options.logger_instance) |log| {
-                log.logCat(.err, "delete", "Failed to stat file {s}: {}", .{ path, err });
-            }
-            const err_msg = try self.allocator.dupe(u8, @errorName(err));
-            return DeleteResult{
-                .success = false,
-                .path = owned_path,
-                .trash_path = null,
-                .error_message = err_msg,
-                .bytes_freed = 0,
-                .history_id = null,
-            };
-        };
+        // Get file/directory info - need to handle both files and directories
+        // statFile only works for files, so we need a different approach for directories
+        var file_size: u64 = 0;
+        var file_stat: ?std.fs.File.Stat = null;
 
-        const file_size = stat.size;
+        // First try to open as directory to check if it's a dir
+        if (std.fs.openDirAbsolute(path, .{})) |dir| {
+            var d = dir;
+            d.close();
+            // For directories, we'll use a pre-calculated size or 0
+            // The actual size should come from the scanner
+            file_size = 0;
+        } else |_| {
+            // Not a directory, try as file
+            const stat = std.fs.cwd().statFile(path) catch |err| {
+                if (self.options.logger_instance) |log| {
+                    log.logCat(.err, "delete", "Failed to stat {s}: {}", .{ path, err });
+                }
+                const err_msg = try self.allocator.dupe(u8, @errorName(err));
+                return DeleteResult{
+                    .success = false,
+                    .path = owned_path,
+                    .trash_path = null,
+                    .error_message = err_msg,
+                    .bytes_freed = 0,
+                    .history_id = null,
+                };
+            };
+            file_size = stat.size;
+            file_stat = stat;
+        }
 
         // Dry run check
         if (self.options.dry_run) {
@@ -225,9 +239,9 @@ pub const Deleter = struct {
             }
         }
 
-        // Check if read-only and skip if configured
-        if (self.options.skip_readonly) {
-            const attrs = platform.FileAttributes.fromStat(stat, std.fs.path.basename(path));
+        // Check if read-only and skip if configured (only for files, not directories)
+        if (self.options.skip_readonly and file_stat != null) {
+            const attrs = platform.FileAttributes.fromStat(file_stat.?, std.fs.path.basename(path));
             if (attrs.is_readonly) {
                 if (self.options.logger_instance) |log| {
                     log.logCat(.warning, "delete", "Skipping read-only file: {s}", .{path});
@@ -304,20 +318,19 @@ pub const Deleter = struct {
 
     /// Permanently delete file
     fn permanentDelete(self: *Deleter, path: []const u8, file_size: u64) !DeleteResult {
-        // Get file info to check if directory
-        const stat = std.fs.cwd().statFile(path) catch |err| {
-            return DeleteResult{
-                .success = false,
-                .path = path,
-                .trash_path = null,
-                .error_message = try self.allocator.dupe(u8, @errorName(err)),
-                .bytes_freed = 0,
-                .history_id = null,
-            };
+        // Check if directory by trying to open it
+        const is_directory = blk: {
+            if (std.fs.openDirAbsolute(path, .{})) |dir| {
+                var d = dir;
+                d.close();
+                break :blk true;
+            } else |_| {
+                break :blk false;
+            }
         };
 
         // Delete based on type
-        if (stat.kind == .directory) {
+        if (is_directory) {
             if (self.options.recursive) {
                 std.fs.deleteTreeAbsolute(path) catch |err| {
                     return DeleteResult{
