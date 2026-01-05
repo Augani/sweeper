@@ -117,6 +117,11 @@ pub const Paths = struct {
     pub fn deinit(self: *Paths, allocator: std.mem.Allocator) void {
         // Free allocated strings
         const platform = Platform.current();
+
+        // Always free home and temp as they're always allocated
+        allocator.free(self.home);
+        allocator.free(self.temp);
+
         switch (platform) {
             .macos, .linux => {
                 allocator.free(self.cache);
