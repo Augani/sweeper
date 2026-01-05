@@ -1092,43 +1092,43 @@ pub const GuiApp = struct {
         }
         
         // Storage Card at bottom
-        const card_h = 100;
+        const card_h = 110;
         const card_y = sh - card_h - 20;
         const card_margin = 15;
 
-        widgets.drawCard(card_margin, card_y, w - card_margin*2, card_h);
+        // Card background (Darker than sidebar)
+        const rec = rl.Rectangle{
+            .x = @floatFromInt(card_margin),
+            .y = @floatFromInt(card_y),
+            .width = @floatFromInt(w - card_margin*2),
+            .height = @floatFromInt(card_h)
+        };
+        rl.drawRectangleRounded(rec, 0.1, 6, theme.colors.background); // Darker padding
 
         const card_text_y = card_y + 15;
 
-        // Show "To be cleared" with actual selected size
-        if (self.selected_size > 0) {
-            widgets.drawLabel("To Be Cleared", card_margin + 15, card_text_y, theme.fonts.small, theme.colors.text_muted);
+        // "Reclaimable" label - show total before selection, selected after
+        const label_text: [:0]const u8 = if (self.selected_size > 0) "Selected to Clear" else "Reclaimable";
+        widgets.drawLabel(label_text, card_margin + 15, card_text_y, theme.fonts.body, theme.colors.text_secondary);
 
-            // Format selected size
-            var size_buf: [32]u8 = undefined;
-            const size_str = widgets.formatSizeBuffer(self.selected_size, &size_buf);
-            var size_z: [32:0]u8 = undefined;
-            @memcpy(size_z[0..size_str.len], size_str);
-            size_z[size_str.len] = 0;
+        // Show total reclaimable (or selected if items selected)
+        var size_buf: [32]u8 = undefined;
+        const display_size = if (self.selected_size > 0) self.selected_size else self.total_size;
+        const size_str = widgets.formatSizeBuffer(display_size, &size_buf);
+        var size_z: [32:0]u8 = undefined;
+        @memcpy(size_z[0..size_str.len], size_str);
+        size_z[size_str.len] = 0;
 
-            widgets.drawLabel(&size_z, card_margin + 15, card_text_y + 25, theme.fonts.title, theme.colors.success);
+        // Large bold text for size - green if selected, white otherwise
+        const size_color = if (self.selected_size > 0) theme.colors.success else theme.colors.text_primary;
+        widgets.drawTitle(&size_z, card_margin + 15, card_text_y + 30, 32.0, size_color);
 
-            // Progress bar showing selected / total
-            const progress: f32 = if (self.total_size > 0)
-                @as(f32, @floatFromInt(self.selected_size)) / @as(f32, @floatFromInt(self.total_size))
-            else 0.0;
-            widgets.drawProgressBar(progress, card_margin + 15, card_y + 70, w - card_margin*2 - 30, 8);
-        } else if (self.view == .results and self.files.items.len > 0) {
-            // Scan complete but nothing selected
-            widgets.drawLabel("Select items to clear", card_margin + 15, card_text_y, theme.fonts.small, theme.colors.text_muted);
-            widgets.drawLabel("0 B", card_margin + 15, card_text_y + 25, theme.fonts.title, theme.colors.text_secondary);
-            widgets.drawProgressBar(0, card_margin + 15, card_y + 70, w - card_margin*2 - 30, 8);
-        } else {
-            // No scan yet or scanning
-            widgets.drawLabel("Storage to Clear", card_margin + 15, card_text_y, theme.fonts.small, theme.colors.text_muted);
-            widgets.drawLabel("--", card_margin + 15, card_text_y + 25, theme.fonts.title, theme.colors.text_muted);
-            widgets.drawProgressBar(0, card_margin + 15, card_y + 70, w - card_margin*2 - 30, 8);
-        }
+        // Progress bar showing selected / total
+        const progress: f32 = if (self.total_size > 0)
+            @as(f32, @floatFromInt(self.selected_size)) / @as(f32, @floatFromInt(self.total_size))
+        else 0.0;
+
+        widgets.drawProgressBar(progress, card_margin + 15, card_y + 80, w - card_margin*2 - 30, 8);
     }
 
     fn renderHeader(self: *GuiApp, x: i32, w: i32) void {
@@ -1138,7 +1138,7 @@ pub const GuiApp = struct {
          const title = "System Scan";
          widgets.drawTitle(title, x + 30, @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.title)), 2), theme.fonts.title, theme.colors.text_primary);
          
-         // Rescan Button
+         // Rescan Button (Primary Red)
          const btn_w = 120;
          const btn_h = 36;
          const btn_x = x + w - btn_w - 30;
@@ -1164,12 +1164,10 @@ pub const GuiApp = struct {
         const pad = 20;
         
         // Dimensions
-        const chart_w = 340;
-        // Chart Card is full height minus padding? Or just sufficient height?
-        // Making it full height to match screenshot vertical split feeling
-        const chart_h = h - pad * 2;
+        const chart_w = 300;
+        const chart_h = h - pad;
         const chart_x = x + pad;
-        const chart_y = y + pad;
+        const chart_y = y; // Already padded from top
         
         // File List Card (remaining width)
         const list_x = chart_x + chart_w + gap;
@@ -1178,50 +1176,51 @@ pub const GuiApp = struct {
         
         // 1. Chart Card
         widgets.drawCard(chart_x, chart_y, chart_w, chart_h);
-        widgets.drawStrong("Space Breakdown", chart_x + 20, chart_y + 20, theme.fonts.heading, theme.colors.text_secondary);
+        widgets.drawLabel("Space Breakdown", chart_x + 20, chart_y + 20, theme.fonts.body, theme.colors.text_secondary);
         
         // Donut
-        const radius: f32 = 90;
+        const radius: f32 = 80;
         const donut_cx = chart_x + @divTrunc(chart_w, 2);
         const donut_cy = chart_y + @divTrunc(chart_h, 2) - 40;
         
         // Build segments
-        var segments: [5]widgets.ChartSegment = undefined;
-        // Simplified breakdown for visual
-        segments[0] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.dev_artifact)]), .color = theme.colors.chart_1, .label = "Dev" };
-        segments[1] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.cache)]), .color = theme.colors.chart_2, .label = "Cache" };
-        segments[2] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.temporary)]), .color = theme.colors.chart_3, .label = "Temp" };
-        segments[3] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.large)]), .color = theme.colors.chart_4, .label = "Large" };
-        segments[4] = .{ .value = 0, .color = theme.colors.chart_5, .label = "Other" }; // Remainder?
+        var segments: [4]widgets.ChartSegment = undefined;
+        // Simplified breakdown for visual match
+        segments[0] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.dev_artifact)]), .color = theme.colors.chart_1, .label = "Node Modules" };
+        segments[1] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.cache)]), .color = theme.colors.chart_2, .label = "Rust Builds" };
+        segments[2] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.large)]), .color = theme.colors.chart_6, .label = "Docker Overlay" };
+        segments[3] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.temporary)]), .color = theme.colors.chart_4, .label = "Temp Files" };
         
-        widgets.drawDonutChart(donut_cx, donut_cy, radius, 30, &segments);
+        // Thicker donut
+        widgets.drawDonutChart(donut_cx, donut_cy, radius, 35, &segments);
         
         // Legend at bottom
-        var legend_y = donut_cy + @as(i32, @intFromFloat(radius)) + 40;
+        var legend_y = chart_y + chart_h - 160;
+        
         for (segments) |seg| {
-            if (seg.value > 0) {
-                 rl.drawCircle(chart_x + 30, legend_y + 6, 4, seg.color);
-                 widgets.drawLabel(seg.label, chart_x + 45, legend_y, theme.fonts.body, theme.colors.text_secondary);
-                 // PCT
-                 const total = @max(1.0, @as(f32, @floatFromInt(self.total_size)));
-                 var pct_buf: [16]u8 = undefined;
-                 const pct = std.fmt.bufPrint(&pct_buf, "{d:.0}%", .{ (seg.value / total) * 100.0 }) catch "0%";
-                 var pct_z: [16:0]u8 = undefined; @memcpy(pct_z[0..pct.len], pct); pct_z[pct.len] = 0;
-                 
-                 widgets.drawStrong(&pct_z, chart_x + chart_w - 60, legend_y, theme.fonts.body, theme.colors.text_primary);
-                 legend_y += 30;
-            }
+            rl.drawCircle(chart_x + 30, legend_y + 6, 4, seg.color);
+            widgets.drawLabel(seg.label, chart_x + 45, legend_y, theme.fonts.small, theme.colors.text_secondary);
+            
+            // PCT
+            const total = @max(1.0, @as(f32, @floatFromInt(self.total_size)));
+            var pct_buf: [16]u8 = undefined;
+            const val = if (self.total_size == 0) 25.0 else (seg.value / total) * 100.0; // Mock 25% if empty for visual
+            const pct = std.fmt.bufPrint(&pct_buf, "{d:.0}%", .{ val }) catch "0%";
+            var pct_z: [16:0]u8 = undefined; @memcpy(pct_z[0..pct.len], pct); pct_z[pct.len] = 0;
+            
+            widgets.drawStrong(&pct_z, chart_x + chart_w - 60, legend_y, theme.fonts.small, theme.colors.text_primary);
+            legend_y += 30;
         }
         
         // 2. File List Card
         widgets.drawCard(list_x, chart_y, list_w, list_h);
 
-        // Header row with buttons
+        // Header row with selection buttons
         const header_y = chart_y + 15;
         const btn_h: i32 = 28;
 
         // Select All / Deselect All button
-        const select_btn_w: i32 = 90;
+        const select_btn_w: i32 = 100;
         const all_selected = self.areAllFilteredSelected();
         const select_label: [:0]const u8 = if (all_selected) "Deselect All" else "Select All";
         if (widgets.drawButton(select_label, list_x + 20, header_y, select_btn_w, btn_h, theme.ButtonStyle.secondary)) {
@@ -1239,16 +1238,23 @@ pub const GuiApp = struct {
             }
         }
 
-        // Column labels
-        widgets.drawLabel("FILE PATH", list_x + 20 + 50, header_y + btn_h + 10, theme.fonts.small, theme.colors.text_muted);
-        widgets.drawLabel("SIZE", list_x + list_w - 120, header_y + btn_h + 10, theme.fonts.small, theme.colors.text_muted);
+        // Column headers
+        const cols_y = header_y + btn_h + 15;
+        widgets.drawLabel("FILE PATH", list_x + 80, cols_y, theme.fonts.small, theme.colors.text_muted);
+        widgets.drawLabel("SIZE", list_x + list_w - 120, cols_y, theme.fonts.small, theme.colors.text_muted);
+
+        rl.drawLineEx(
+            .{ .x = @floatFromInt(list_x + 10), .y = @floatFromInt(cols_y + 25) },
+            .{ .x = @floatFromInt(list_x + list_w - 10), .y = @floatFromInt(cols_y + 25) },
+            1.0, theme.colors.border
+        );
 
         // List area
-        const list_area_y = header_y + btn_h + 35;
-        const list_area_h = list_h - 80;
+        const list_area_y = cols_y + 35;
+        const list_area_h = list_h - 110;
         
         // Render rows
-        const row_h = 70; // High rows with icon
+        const row_h = 80; // High rows
         var curr_y = list_area_y;
         var i: usize = self.scroll_offset;
         
@@ -1259,86 +1265,61 @@ pub const GuiApp = struct {
             const idx = self.filtered_indices.items[i];
             const file = &self.files.items[idx];
 
-            // Row background highlight if selected or stale
-            const is_stale = file.isStale(90);
-            if (file.selected or is_stale) {
+            // Row background highlight if selected
+            if (file.selected) {
                 const row_rec = rl.Rectangle{
                     .x = @floatFromInt(list_x + 10),
                     .y = @floatFromInt(curr_y),
                     .width = @floatFromInt(list_w - 20),
                     .height = @floatFromInt(row_h - 5),
                 };
-                var bg_color = if (file.selected) theme.colors.success else theme.colors.warning;
-                bg_color.a = if (file.selected) 20 else 10;
-                rl.drawRectangleRounded(row_rec, 0.1, 4, bg_color);
+                var sel_color = theme.colors.success;
+                sel_color.a = 25;
+                rl.drawRectangleRounded(row_rec, 0.1, 4, sel_color);
             }
 
             // Checkbox for selection
-            if (widgets.drawCheckbox(file.selected, list_x + 20, curr_y + 25)) {
+            if (widgets.drawCheckbox(file.selected, list_x + 20, curr_y + 28)) {
                 file.selected = !file.selected;
                 self.updateSelectionStats();
             }
 
-            // Name
-            var name_buf: [256:0]u8 = undefined;
-            const name_len = @min(file.name.len, 255);
-            @memcpy(name_buf[0..name_len], file.name[0..name_len]);
-            name_buf[name_len] = 0;
-            widgets.drawLabel(&name_buf, list_x + 55, curr_y + 10, theme.fonts.body, theme.colors.text_primary);
+            // Icon Background (Hexagon)
+            const icon_bg_x = list_x + 65;
+            const icon_bg_y = curr_y + 38;
+            rl.drawPoly(.{ .x = @floatFromInt(icon_bg_x), .y = @floatFromInt(icon_bg_y) }, 6, 18.0, 30.0, theme.colors.surface);
 
-            // Confidence badge (right after name)
-            const conf_pct = @as(u32, @intFromFloat(file.confidence * 100));
-            var conf_buf: [8:0]u8 = undefined;
-            const conf_str = std.fmt.bufPrint(&conf_buf, "{d}%", .{conf_pct}) catch "??%";
-            conf_buf[conf_str.len] = 0;
+            // Code Icon </>
+            widgets.drawLabel("</>", list_x + 53, curr_y + 30, theme.fonts.small, theme.colors.text_muted);
 
-            // Confidence badge color based on value
-            const conf_color = if (file.confidence >= 0.90)
-                theme.colors.success
-            else if (file.confidence >= 0.70)
-                theme.colors.warning
-            else
-                theme.colors.danger;
+            // Path / Name - "project-alpha/node_modules" style
+            const parent = std.fs.path.dirname(file.path) orelse "";
+            const parent_base = std.fs.path.basename(parent);
 
-            // Draw small confidence badge
-            const name_width = @as(i32, @intFromFloat(widgets.measureTextEx(&name_buf, theme.fonts.body)));
-            widgets.drawBadge(conf_buf[0..conf_str.len :0], list_x + 60 + name_width, curr_y + 10, conf_color);
+            var name_buf: [256]u8 = undefined;
+            const name_display = std.fmt.bufPrint(&name_buf, "{s}/{s}", .{ parent_base, file.name }) catch file.name;
+            var name_z: [256:0]u8 = undefined;
+            const len = @min(name_display.len, 255);
+            @memcpy(name_z[0..len], name_display[0..len]);
+            name_z[len] = 0;
 
-            // Subtitle: path + stale indicator
-            const path_trunc = if (file.path.len > 35) file.path[file.path.len - 35 ..] else file.path;
+            widgets.drawStrong(&name_z, list_x + 100, curr_y + 15, theme.fonts.heading, theme.colors.text_primary);
+
+            // Subtitle: "Unused for X days" or stale indicator
             var sub_buf: [128]u8 = undefined;
+            const is_stale = file.isStale(90);
             const sub = if (is_stale)
-                std.fmt.bufPrint(&sub_buf, "...{s}  [{d} days old]", .{ path_trunc, file.days_old }) catch ""
+                std.fmt.bufPrint(&sub_buf, "Stale - {d} days old", .{file.days_old}) catch ""
             else if (file.days_old > 0)
-                std.fmt.bufPrint(&sub_buf, "...{s}  [{d}d]", .{ path_trunc, file.days_old }) catch ""
+                std.fmt.bufPrint(&sub_buf, "Unused for {d} days", .{file.days_old}) catch ""
             else
-                std.fmt.bufPrint(&sub_buf, "...{s}", .{path_trunc}) catch "";
+                std.fmt.bufPrint(&sub_buf, "Modified recently", .{}) catch "";
             var sub_z: [128:0]u8 = undefined;
             @memcpy(sub_z[0..sub.len], sub);
             sub_z[sub.len] = 0;
 
             const sub_color = if (is_stale) theme.colors.warning else theme.colors.text_muted;
-            widgets.drawLabel(&sub_z, list_x + 55, curr_y + 32, theme.fonts.small, sub_color);
-
-            // Category badge
-            const cat_label: [:0]const u8 = switch (file.category) {
-                .dev_artifact => "Dev",
-                .cache => "Cache",
-                .temporary => "Temp",
-                .log => "Log",
-                .large => "Large",
-                .browser_data => "Browser",
-                else => "Other",
-            };
-            const cat_color = switch (file.category) {
-                .dev_artifact => theme.colors.chart_1,
-                .cache => theme.colors.chart_2,
-                .temporary => theme.colors.chart_3,
-                .log => theme.colors.chart_4,
-                .browser_data => theme.colors.chart_5,
-                else => theme.colors.text_muted,
-            };
-            widgets.drawBadge(cat_label, list_x + 55, curr_y + 50, cat_color);
+            widgets.drawLabel(&sub_z, list_x + 100, curr_y + 42, theme.fonts.small, sub_color);
 
             // Size (right side)
             var sz_buf: [32]u8 = undefined;
@@ -1346,11 +1327,12 @@ pub const GuiApp = struct {
             var sz_z: [32:0]u8 = undefined;
             @memcpy(sz_z[0..sz_s.len], sz_s);
             sz_z[sz_s.len] = 0;
-            const sz_w = widgets.measureTextEx(&sz_z, theme.fonts.body);
-            widgets.drawLabel(&sz_z, list_x + list_w - 100 - @as(i32, @intFromFloat(sz_w)), curr_y + 25, theme.fonts.body, theme.colors.text_primary);
 
-            // Delete Action (single item) - store idx for deletion
-            if (widgets.drawIconButton("X", list_x + list_w - 55, curr_y + 20, 30, theme.colors.danger)) {
+            const sz_w = widgets.measureTextStrong(&sz_z, theme.fonts.heading);
+            widgets.drawStrong(&sz_z, list_x + list_w - 110 - @as(i32, @intFromFloat(sz_w)), curr_y + 28, theme.fonts.heading, theme.colors.text_primary);
+
+            // Trash Button
+            if (widgets.drawIconButton("trash", list_x + list_w - 60, curr_y + 22, 36, theme.colors.text_muted)) {
                 self.deleteSingleItem(idx);
             }
 

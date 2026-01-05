@@ -13,57 +13,57 @@ pub var fonts_initialized: bool = false;
 /// Color palette for the application
 pub const colors = struct {
     // Layout colors
-    pub const background = rl.Color.init(17, 17, 27, 255);      // Main BG (Darker)
-    pub const sidebar_bg = rl.Color.init(30, 30, 46, 255);      // Sidebar BG
-    pub const card_bg = rl.Color.init(49, 50, 68, 255);         // Card/Element BG
+    pub const background = rl.Color.init(16, 16, 18, 255);      // #101012 - Main BG
+    pub const sidebar_bg = rl.Color.init(23, 23, 26, 255);      // #17171A - Sidebar BG
+    pub const card_bg = rl.Color.init(23, 23, 26, 255);         // #17171A - Card BG (Same as sidebar)
     
     // Interactive colors
-    pub const surface = rl.Color.init(49, 50, 68, 255);         // Same as card_bg
-    pub const surface_hover = rl.Color.init(69, 71, 90, 255);   // Lighter surface
-    pub const surface_active = rl.Color.init(88, 91, 112, 255); // Even lighter
-
+    pub const surface = rl.Color.init(32, 32, 36, 255);         // Surface for inputs/secondary
+    pub const surface_hover = rl.Color.init(45, 45, 50, 255);   // Lighter surface
+    pub const surface_active = rl.Color.init(220, 38, 38, 30);  // Red tint active
+    
     // Text colors
-    pub const text_primary = rl.Color.init(205, 214, 244, 255);   // White-ish
-    pub const text_secondary = rl.Color.init(166, 173, 200, 255); // Grey-ish
-    pub const text_muted = rl.Color.init(108, 112, 134, 255);     // Darker grey
-
+    pub const text_primary = rl.Color.init(240, 240, 245, 255);   // #F0F0F5
+    pub const text_secondary = rl.Color.init(161, 161, 166, 255); // #A1A1A6 (Grey text)
+    pub const text_muted = rl.Color.init(110, 110, 115, 255);     // Darker grey
+    
     // Accent colors
-    pub const accent = rl.Color.init(137, 180, 250, 255);         // Blue/Violet accent
-    pub const accent_secondary = rl.Color.init(203, 166, 247, 255); // Pink/Purple secondary
-    pub const accent_hover = rl.Color.init(180, 190, 254, 255);
-
+    pub const accent = rl.Color.init(220, 38, 38, 255);           // #DC2626 (Red scan/action)
+    pub const accent_secondary = rl.Color.init(239, 68, 68, 255); // Lighter red
+    pub const accent_hover = rl.Color.init(185, 28, 28, 255);     // Darker red hover
+    
     // Chart / Category colors
-    pub const chart_1 = rl.Color.init(137, 180, 250, 255); // Blue
-    pub const chart_2 = rl.Color.init(203, 166, 247, 255); // Purple
-    pub const chart_3 = rl.Color.init(243, 139, 168, 255); // Red/Pink
-    pub const chart_4 = rl.Color.init(166, 227, 161, 255); // Green
-    pub const chart_5 = rl.Color.init(249, 226, 175, 255); // Yellow
-    pub const chart_6 = rl.Color.init(148, 226, 213, 255); // Teal
-
+    pub const chart_1 = rl.Color.init(220, 38, 38, 255); // Red (Primary/Dev)
+    pub const chart_2 = rl.Color.init(252, 165, 165, 255); // Light Red (Cache)
+    pub const chart_3 = rl.Color.init(75, 85, 99, 255);  // Grey (Temp/Other)
+    pub const chart_4 = rl.Color.init(31, 41, 55, 255);  // Dark Grey
+    pub const chart_5 = rl.Color.init(248, 113, 113, 255); // Another Red
+    pub const chart_6 = rl.Color.init(153, 27, 27, 255); // Dark Red
+    
     // Status colors
-    pub const success = rl.Color.init(166, 227, 161, 255);
-    pub const warning = rl.Color.init(249, 226, 175, 255);
-    pub const danger = rl.Color.init(243, 139, 168, 255);
-
+    pub const success = rl.Color.init(34, 197, 94, 255); // Green
+    pub const warning = rl.Color.init(234, 179, 8, 255); // Yellow
+    pub const danger = rl.Color.init(220, 38, 38, 255); // Red
+    
     // Border colors
-    pub const border = rl.Color.init(69, 71, 90, 255);
-    pub const border_focus = rl.Color.init(137, 180, 250, 255);
-
+    pub const border = rl.Color.init(45, 45, 50, 255);
+    pub const border_focus = rl.Color.init(220, 38, 38, 255);
+    
     // Selection
-    pub const selected = rl.Color.init(137, 180, 250, 30);
+    pub const selected = rl.Color.init(220, 38, 38, 20); // Low opacity red
     pub const selected_text = rl.Color.init(255, 255, 255, 255);
-
+    
     // Scrollbar
     pub const scrollbar_bg = rl.Color.init(0, 0, 0, 0);
-    pub const scrollbar_thumb = rl.Color.init(88, 91, 112, 255);
-    pub const scrollbar_thumb_hover = rl.Color.init(108, 112, 134, 255);
+    pub const scrollbar_thumb = rl.Color.init(63, 63, 70, 255);
+    pub const scrollbar_thumb_hover = rl.Color.init(82, 82, 91, 255);
     
     // Mappings for older code compat (aliases)
-    pub const temporary = chart_5; 
-    pub const cache = chart_1;
-    pub const dev_artifact = chart_2;
-    pub const large = chart_3;
-    pub const log = chart_4;
+    pub const temporary = chart_3; 
+    pub const cache = chart_2;
+    pub const dev_artifact = chart_1;
+    pub const large = chart_1;
+    pub const log = chart_3;
     pub const duplicate = chart_3;
     pub const unused = text_muted;
     pub const old_download = chart_2;

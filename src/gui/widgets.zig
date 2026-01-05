@@ -122,7 +122,7 @@ pub fn drawSidebarItem(label: [:0]const u8, icon_type: [:0]const u8, x: i32, y: 
              .width = @floatFromInt(w - theme.spacing.md),
              .height = @floatFromInt(h)
         };
-        rl.drawRectangleRounded(rec, 0.5, 6, color);
+        rl.drawRectangleRounded(rec, 0.4, 6, color);
     }
 
     // Draw icon based on type
@@ -132,7 +132,7 @@ pub fn drawSidebarItem(label: [:0]const u8, icon_type: [:0]const u8, x: i32, y: 
     drawSidebarIcon(icon_type, icon_x, icon_y, icon_color);
 
     // Label
-    const text_color = if (active) theme.colors.text_primary else theme.colors.text_secondary;
+    const text_color = if (active) theme.colors.accent else theme.colors.text_secondary;
     const label_y = y + @divTrunc(h - @as(i32, @intFromFloat(theme.fonts.body)), 2);
 
     if (active) {
@@ -223,25 +223,49 @@ pub fn drawIconButton(icon: [:0]const u8, x: i32, y: i32, size: i32, color: rl.C
     const hovered = isMouseOver(x, y, size, size);
     const clicked = hovered and rl.isMouseButtonReleased(.left);
     
-    const rec = rl.Rectangle{
-        .x = @floatFromInt(x),
-        .y = @floatFromInt(y),
-        .width = @floatFromInt(size),
-        .height = @floatFromInt(size)
-    };
-    
+    // Circular background
     if (hovered) {
+        const rec = rl.Rectangle{
+            .x = @floatFromInt(x),
+            .y = @floatFromInt(y),
+            .width = @floatFromInt(size),
+            .height = @floatFromInt(size)
+        };
         rl.drawRectangleRounded(rec, 0.5, 6, theme.colors.surface_hover);
     }
     
-    // Icon usually fits best with Regular or similar, Heading size
-    const text_w = measureTextEx(icon, theme.fonts.heading);
-    const text_x = x + @divTrunc(size - @as(i32, @intFromFloat(text_w)), 2);
-    const text_y = y + @divTrunc(size - @as(i32, @intFromFloat(theme.fonts.heading)), 2);
-    
-    drawLabel(icon, text_x, text_y, theme.fonts.heading, color);
+    if (std.mem.eql(u8, icon, "trash")) {
+        const cx = x + @divTrunc(size, 2);
+        const cy = y + @divTrunc(size, 2);
+        drawTrashIcon(cx, cy, 18, color);
+    } else {
+        const text_w = measureTextEx(icon, theme.fonts.heading);
+        const text_x = x + @divTrunc(size - @as(i32, @intFromFloat(text_w)), 2);
+        const text_y = y + @divTrunc(size - @as(i32, @intFromFloat(theme.fonts.heading)), 2);
+        drawLabel(icon, text_x, text_y, theme.fonts.heading, color);
+    }
     
     return clicked;
+}
+
+/// Draw a trash can icon
+fn drawTrashIcon(cx: i32, cy: i32, size: f32, color: rl.Color) void {
+    const s = size;
+    const w = s * 0.7;
+    const h = s * 0.8;
+    const x = @as(f32, @floatFromInt(cx)) - w/2.0;
+    const y = @as(f32, @floatFromInt(cy)) - h/2.0;
+    
+    // Lid
+    rl.drawRectangleLinesEx(.{ .x = x, .y = y, .width = w, .height = 2 }, 1.5, color);
+    rl.drawRectangleLinesEx(.{ .x = x + w/4.0, .y = y - 2, .width = w/2.0, .height = 2 }, 1.5, color);
+    
+    // Body
+    rl.drawRectangleLinesEx(.{ .x = x + 2, .y = y + 3, .width = w - 4, .height = h - 3 }, 1.5, color);
+    
+    // Lines
+    rl.drawLineEx(.{ .x = x + w/3.0 + 1, .y = y + 6 }, .{ .x = x + w/3.0 + 1, .y = y + h - 3 }, 1.5, color);
+    rl.drawLineEx(.{ .x = x + 2.0*w/3.0 - 1, .y = y + 6 }, .{ .x = x + 2.0*w/3.0 - 1, .y = y + h - 3 }, 1.5, color);
 }
 
 /// Draw a checkbox and return true if clicked
