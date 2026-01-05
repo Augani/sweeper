@@ -29,11 +29,30 @@ pub fn run(allocator: std.mem.Allocator) !void {
     rl.initWindow(1280, 850, "Sweeper");
     defer rl.closeWindow();
 
-    // Load custom fonts at higher base size for crisp rendering
-    const font_base = "resources/";
-    const font_reg_path = font_base ++ "Inter-Regular.ttf";
-    const font_semi_path = font_base ++ "Inter-SemiBold.ttf";
-    const font_bold_path = font_base ++ "Inter-Bold.ttf";
+    // Get the directory of the executable to find resources
+    var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&exe_dir_buf) catch "";
+    const exe_dir = std.fs.path.dirname(exe_path) orelse "";
+
+    // Build resource paths relative to executable (null-terminated for raylib)
+    var font_reg_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    var font_semi_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    var font_bold_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+
+    const font_reg_path: [:0]const u8 = if (exe_dir.len > 0)
+        std.fmt.bufPrintZ(&font_reg_buf, "{s}/resources/Inter-Regular.ttf", .{exe_dir}) catch "resources/Inter-Regular.ttf"
+    else
+        "resources/Inter-Regular.ttf";
+
+    const font_semi_path: [:0]const u8 = if (exe_dir.len > 0)
+        std.fmt.bufPrintZ(&font_semi_buf, "{s}/resources/Inter-SemiBold.ttf", .{exe_dir}) catch "resources/Inter-SemiBold.ttf"
+    else
+        "resources/Inter-SemiBold.ttf";
+
+    const font_bold_path: [:0]const u8 = if (exe_dir.len > 0)
+        std.fmt.bufPrintZ(&font_bold_buf, "{s}/resources/Inter-Bold.ttf", .{exe_dir}) catch "resources/Inter-Bold.ttf"
+    else
+        "resources/Inter-Bold.ttf";
 
     // Load fonts at 48px base size for better quality when scaling down
     const font_size: i32 = 48;
@@ -61,7 +80,12 @@ pub fn run(allocator: std.mem.Allocator) !void {
     };
 
     // Load and set window icon
-    const icon_path = "resources/icon.png";
+    var icon_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const icon_path: [:0]const u8 = if (exe_dir.len > 0)
+        std.fmt.bufPrintZ(&icon_buf, "{s}/resources/icon.png", .{exe_dir}) catch "resources/icon.png"
+    else
+        "resources/icon.png";
+
     if (rl.loadImage(icon_path)) |icon| {
         icon.useAsWindowIcon();
         rl.unloadImage(icon);

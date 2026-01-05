@@ -96,6 +96,13 @@ pub fn build(b: *std.Build) void {
 
         b.installArtifact(gui_exe);
 
+        // Install resources directory next to the executable
+        b.installDirectory(.{
+            .source_dir = b.path("resources"),
+            .install_dir = .bin,
+            .install_subdir = "resources",
+        });
+
         // Run GUI step
         const run_gui_cmd = b.addRunArtifact(gui_exe);
         run_gui_cmd.step.dependOn(b.getInstallStep());
