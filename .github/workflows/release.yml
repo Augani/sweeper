@@ -14,19 +14,12 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            target: aarch64-macos
             name: macos-arm64
             ext: tar.gz
-          - os: macos-latest
-            target: x86_64-macos
-            name: macos-x64
-            ext: tar.gz
           - os: ubuntu-latest
-            target: x86_64-linux-gnu
             name: linux-x64
             ext: tar.gz
           - os: windows-latest
-            target: x86_64-windows-gnu
             name: windows-x64
             ext: zip
 
@@ -63,7 +56,7 @@ jobs:
           echo "$PWD/zig-x86_64-windows-0.15.2" >> $GITHUB_PATH
 
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
