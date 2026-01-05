@@ -1,0 +1,106 @@
+{
+  "version": "1.0",
+  "custom_rules": [
+    {
+      "name": "video_files_large",
+      "description": "Mark large video files for review",
+      "type": "size_range",
+      "pattern": "",
+      "action": "categorize",
+      "priority": 60,
+      "enabled": true,
+      "size_min": 524288000,
+      "category": "large"
+    },
+    {
+      "name": "video_extensions",
+      "description": "Video file extensions",
+      "type": "extension",
+      "pattern": ".mp4",
+      "action": "include",
+      "priority": 50,
+      "enabled": true,
+      "category": "media"
+    },
+    {
+      "name": "iso_images",
+      "description": "ISO disk images are usually large and temporary",
+      "type": "extension",
+      "pattern": ".iso",
+      "action": "mark_safe",
+      "priority": 70,
+      "enabled": true,
+      "category": "temporary"
+    },
+    {
+      "name": "dmg_files",
+      "description": "DMG installer files",
+      "type": "extension",
+      "pattern": ".dmg",
+      "action": "mark_safe",
+      "priority": 65,
+      "enabled": true,
+      "category": "temporary"
+    },
+    {
+      "name": "log_rotation",
+      "description": "Rotated log files (.log.1, .log.2, etc)",
+      "type": "name_pattern",
+      "pattern": "*.log.*",
+      "action": "mark_safe",
+      "priority": 80,
+      "enabled": true,
+      "category": "log"
+    },
+    {
+      "name": "npm_cache",
+      "description": "NPM package cache",
+      "type": "directory",
+      "pattern": "/.npm/",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "category": "cache"
+    },
+    {
+      "name": "yarn_cache",
+      "description": "Yarn package cache",
+      "type": "directory",
+      "pattern": "/.yarn/cache/",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "category": "cache"
+    },
+    {
+      "name": "gradle_cache",
+      "description": "Gradle build cache",
+      "type": "directory",
+      "pattern": "/.gradle/",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "category": "cache"
+    },
+    {
+      "name": "docker_temp",
+      "description": "Docker temporary files",
+      "type": "path_pattern",
+      "pattern": "/docker/tmp/",
+      "action": "mark_safe",
+      "priority": 70,
+      "enabled": true,
+      "category": "temporary"
+    },
+    {
+      "name": "core_dumps",
+      "description": "Core dump files from crashes",
+      "type": "name_pattern",
+      "pattern": "core.*",
+      "action": "mark_safe",
+      "priority": 85,
+      "enabled": true,
+      "category": "temporary"
+    }
+  ]
+}

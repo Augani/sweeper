@@ -410,22 +410,25 @@ pub const TrashManager = struct {
 
 /// URL encode a path (for Linux .trashinfo files)
 fn urlEncode(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result = try std.ArrayList(u8).initCapacity(allocator, path.len * 2);
+    errdefer result.deinit(allocator);
 
     for (path) |c| {
         if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~' or c == '/') {
-            try result.append(c);
+            try result.append(allocator, c);
         } else {
-            try result.appendSlice(&[_]u8{ '%', hexDigit(c >> 4), hexDigit(c & 0x0F) });
+            const high: u4 = @truncate(c >> 4);
+            const low: u4 = @truncate(c & 0x0F);
+            try result.appendSlice(allocator, &[_]u8{ '%', hexDigit(high), hexDigit(low) });
         }
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 fn hexDigit(value: u4) u8 {
-    return if (value < 10) '0' + value else 'A' + value - 10;
+    const v: u8 = value;
+    return if (v < 10) '0' + v else 'A' + v - 10;
 }
 
 /// Format timestamp as ISO 8601 datetime

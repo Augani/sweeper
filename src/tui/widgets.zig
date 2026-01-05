@@ -366,6 +366,219 @@ pub const Spinner = struct {
     }
 };
 
+/// Gauge widget for displaying a metric with visual bar
+pub const Gauge = struct {
+    value: u64 = 0,
+    max_value: u64 = 100,
+    label: []const u8 = "",
+    unit: []const u8 = "",
+    show_value: bool = true,
+    show_percentage: bool = true,
+    style: Style = Style.default,
+    bar_style: Style = Style.default.withFg(.cyan),
+    height: u16 = 1,
+
+    pub fn draw(self: Gauge, buf: *Buffer, rect: Rect) void {
+        if (rect.height < 1) return;
+
+        var y_offset: u16 = 0;
+
+        // Draw label if present
+        if (self.label.len > 0) {
+            buf.drawStringMax(rect.x, rect.y, self.label, rect.width, self.style.withBold());
+            y_offset += 1;
+            if (y_offset >= rect.height) return;
+        }
+
+        // Calculate percentage
+        const percentage = if (self.max_value > 0)
+            @as(f32, @floatFromInt(self.value)) / @as(f32, @floatFromInt(self.max_value))
+        else
+            0.0;
+
+        const clamped_pct = @min(1.0, @max(0.0, percentage));
+
+        // Draw progress bar
+        const bar_width = rect.width -| 2;
+        if (bar_width > 0) {
+            const filled = @as(u16, @intFromFloat(@as(f32, @floatFromInt(bar_width)) * clamped_pct));
+
+            buf.setChar(rect.x, rect.y + y_offset, '[', self.style);
+            var x: u16 = 0;
+            while (x < bar_width) : (x += 1) {
+                const char: u21 = if (x < filled) 0x2588 else 0x2591; // █ or ░
+                buf.setChar(rect.x + 1 + x, rect.y + y_offset, char, self.bar_style);
+            }
+            buf.setChar(rect.x + 1 + bar_width, rect.y + y_offset, ']', self.style);
+            y_offset += 1;
+        }
+
+        // Draw value and percentage
+        if ((self.show_value or self.show_percentage) and y_offset < rect.height) {
+            var info_buf: [64]u8 = undefined;
+            var info_text: []const u8 = "";
+
+            if (self.show_value and self.show_percentage) {
+                info_text = std.fmt.bufPrint(&info_buf, "{d} {s} ({d:.1}%)", .{
+                    self.value,
+                    self.unit,
+                    clamped_pct * 100.0,
+                }) catch "";
+            } else if (self.show_value) {
+                info_text = std.fmt.bufPrint(&info_buf, "{d} {s}", .{ self.value, self.unit }) catch "";
+            } else if (self.show_percentage) {
+                info_text = std.fmt.bufPrint(&info_buf, "{d:.1}%", .{clamped_pct * 100.0}) catch "";
+            }
+
+            if (info_text.len > 0) {
+                const x_pos = rect.x + (rect.width - @as(u16, @intCast(@min(info_text.len, rect.width)))) / 2;
+                buf.drawStringMax(x_pos, rect.y + y_offset, info_text, rect.width, self.style);
+            }
+        }
+    }
+};
+
+/// Sparkline widget for showing trends in compact form
+pub const Sparkline = struct {
+    data: []const u64,
+    max_value: ?u64 = null,
+    style: Style = Style.default.withFg(.green),
+    chars: []const u21 = &[_]u21{ 0x2581, 0x2582, 0x2583, 0x2584, 0x2585, 0x2586, 0x2587, 0x2588 }, // ▁▂▃▄▅▆▇█
+
+    pub fn draw(self: Sparkline, buf: *Buffer, rect: Rect) void {
+        if (rect.width == 0 or self.data.len == 0) return;
+
+        // Determine max value
+        var max: u64 = self.max_value orelse blk: {
+            var m: u64 = 0;
+            for (self.data) |v| {
+                if (v > m) m = v;
+            }
+            break :blk m;
+        };
+
+        if (max == 0) max = 1;
+
+        // Draw sparkline
+        const samples_to_show = @min(self.data.len, rect.width);
+        const start_idx = if (self.data.len > rect.width) self.data.len - rect.width else 0;
+
+        var x: u16 = 0;
+        for (self.data[start_idx..][0..samples_to_show]) |value| {
+            const ratio = @as(f32, @floatFromInt(value)) / @as(f32, @floatFromInt(max));
+            const char_idx = @as(usize, @intFromFloat(ratio * @as(f32, @floatFromInt(self.chars.len - 1))));
+            const char = self.chars[@min(char_idx, self.chars.len - 1)];
+
+            buf.setChar(rect.x + x, rect.y, char, self.style);
+            x += 1;
+        }
+    }
+};
+
+/// Multi-progress widget for showing multiple concurrent operations
+pub const MultiProgress = struct {
+    items: []const ProgressItem,
+    show_labels: bool = true,
+    compact: bool = false,
+
+    pub const ProgressItem = struct {
+        label: []const u8,
+        progress: f32,
+        style: Style = Style.default.withFg(.cyan),
+    };
+
+    pub fn draw(self: MultiProgress, buf: *Buffer, rect: Rect) void {
+        if (rect.height == 0 or self.items.len == 0) return;
+
+        const row_height: u16 = if (self.compact) 1 else 2;
+        var y: u16 = 0;
+
+        for (self.items) |item| {
+            if (y >= rect.height) break;
+
+            const item_rect = Rect{
+                .x = rect.x,
+                .y = rect.y + y,
+                .width = rect.width,
+                .height = @min(row_height, rect.height - y),
+            };
+
+            var progress_bar = ProgressBar{
+                .progress = item.progress,
+                .label = if (self.show_labels) item.label else null,
+                .filled_style = item.style,
+            };
+
+            progress_bar.draw(buf, item_rect);
+            y += row_height;
+        }
+    }
+};
+
+/// Size chart widget for visualizing space usage
+pub const SizeChart = struct {
+    segments: []const Segment,
+    total: u64 = 0,
+    show_legend: bool = true,
+    height: u16 = 3,
+
+    pub const Segment = struct {
+        label: []const u8,
+        value: u64,
+        style: Style,
+    };
+
+    pub fn draw(self: SizeChart, buf: *Buffer, rect: Rect) void {
+        if (rect.width < 10 or rect.height < 2 or self.segments.len == 0) return;
+
+        var total = self.total;
+        if (total == 0) {
+            for (self.segments) |seg| {
+                total += seg.value;
+            }
+        }
+
+        if (total == 0) return;
+
+        var y: u16 = 0;
+
+        // Draw the bar chart
+        const bar_width = rect.width;
+        var x_offset: u16 = 0;
+
+        for (self.segments) |seg| {
+            const seg_width = @as(u16, @intFromFloat(@as(f32, @floatFromInt(seg.value)) / @as(f32, @floatFromInt(total)) * @as(f32, @floatFromInt(bar_width))));
+
+            if (seg_width > 0 and x_offset < bar_width) {
+                const actual_width = @min(seg_width, bar_width - x_offset);
+                var sx: u16 = 0;
+                while (sx < actual_width) : (sx += 1) {
+                    buf.setChar(rect.x + x_offset + sx, rect.y + y, 0x2588, seg.style); // █
+                }
+                x_offset += actual_width;
+            }
+        }
+        y += 1;
+
+        // Draw legend if enabled
+        if (self.show_legend and y < rect.height) {
+            y += 1; // Spacing
+
+            for (self.segments) |seg| {
+                if (y >= rect.height) break;
+
+                const pct = @as(f32, @floatFromInt(seg.value)) / @as(f32, @floatFromInt(total)) * 100.0;
+                var legend_buf: [64]u8 = undefined;
+                const legend = std.fmt.bufPrint(&legend_buf, "{s}: {d:.1}%", .{ seg.label, pct }) catch "";
+
+                buf.setChar(rect.x, rect.y + y, 0x25A0, seg.style); // ■
+                buf.drawStringMax(rect.x + 2, rect.y + y, legend, rect.width - 2, Style.default);
+                y += 1;
+            }
+        }
+    }
+};
+
 // Tests
 test "progress bar" {
     const allocator = std.testing.allocator;

@@ -2,6 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const platform = @import("platform.zig");
 
+// Re-export config submodules
+pub const rules = @import("config/rules.zig");
+pub const loader = @import("config/loader.zig");
+
 /// Application configuration
 pub const Config = struct {
     /// Directories to scan
@@ -31,12 +35,16 @@ pub const Config = struct {
     /// Categories to scan
     scan_categories: ScanCategories = .{},
 
+    /// Custom rule sets
+    rule_sets: std.ArrayListUnmanaged(rules.RuleSet),
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Config {
         return Config{
             .scan_paths = .{},
             .exclude_patterns = .{},
+            .rule_sets = .{},
             .allocator = allocator,
         };
     }
@@ -51,6 +59,11 @@ pub const Config = struct {
             self.allocator.free(pattern);
         }
         self.exclude_patterns.deinit(self.allocator);
+
+        for (self.rule_sets.items) |*rule_set| {
+            rule_set.deinit();
+        }
+        self.rule_sets.deinit(self.allocator);
     }
 
     pub fn addScanPath(self: *Config, path: []const u8) !void {
@@ -96,6 +109,63 @@ pub const Config = struct {
             .unknown => {},
         }
     }
+
+    /// Load configuration from a file
+    pub fn loadFromFile(self: *Config, file_path: []const u8) !void {
+        const format = loader.ConfigFormat.fromExtension(std.fs.path.extension(file_path)) orelse {
+            return error.UnsupportedConfigFormat;
+        };
+
+        const loaded = switch (format) {
+            .json => try loader.loadFromJson(self.allocator, file_path),
+        };
+
+        // Transfer loaded config to self
+        self.deinit();
+        self.* = loaded;
+    }
+
+    /// Save configuration to a file
+    pub fn saveToFile(self: *const Config, file_path: []const u8) !void {
+        const format = loader.ConfigFormat.fromExtension(std.fs.path.extension(file_path)) orelse {
+            return error.UnsupportedConfigFormat;
+        };
+
+        switch (format) {
+            .json => try loader.saveToJson(self.allocator, self, file_path),
+        }
+    }
+
+    /// Add a custom rule set
+    pub fn addRuleSet(self: *Config, rule_set: rules.RuleSet) !void {
+        try self.rule_sets.append(self.allocator, rule_set);
+    }
+
+    /// Load rules from a file
+    pub fn loadRulesFromFile(self: *Config, file_path: []const u8) !void {
+        const rule_set = try loader.loadRulesFromJson(self.allocator, file_path);
+        try self.addRuleSet(rule_set);
+    }
+
+    /// Get default configuration file path
+    pub fn getDefaultConfigPath(allocator: std.mem.Allocator) ![]const u8 {
+        return try loader.getDefaultConfigPath(allocator);
+    }
+
+    /// Check if a file should be excluded based on custom rules
+    pub fn shouldExcludeByRules(self: *const Config, file: *const @import("scanner.zig").FileInfo) bool {
+        for (self.rule_sets.items) |*rule_set| {
+            const matching_rules = rule_set.findMatchingRules(file, self.allocator) catch continue;
+            defer self.allocator.free(matching_rules);
+
+            for (matching_rules) |rule| {
+                if (rule.action == .exclude) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 };
 
 /// Categories of files to scan
@@ -136,6 +206,9 @@ pub const FilePatterns = struct {
         ".swp",
         ".swo",
         "~",
+        ".crash",
+        ".dmp",
+        ".dump",
     };
 
     /// Cache directory names
@@ -146,6 +219,7 @@ pub const FilePatterns = struct {
         "__pycache__",
         ".pytest_cache",
         ".mypy_cache",
+        "Caches",
     };
 
     /// Log file extensions
@@ -168,6 +242,11 @@ pub const FilePatterns = struct {
         "venv",
         ".venv",
         "env",
+        ".next",
+        ".nuxt",
+        ".output",
+        "coverage",
+        ".nyc_output",
     };
 
     /// Browser cache directories by browser
@@ -183,6 +262,53 @@ pub const FilePatterns = struct {
             "Safari/LocalStorage",
             "Caches/com.apple.Safari",
         };
+    };
+
+    /// macOS-specific junk files
+    pub const macos_junk = [_][]const u8{
+        ".DS_Store",
+        ".Spotlight-V100",
+        ".Trashes",
+        ".fseventsd",
+        ".TemporaryItems",
+        ".localized",
+        "._",
+    };
+
+    /// macOS-specific cache/waste directories (under ~/Library/)
+    pub const macos_library_waste = [_][]const u8{
+        "Caches",
+        "Logs",
+        "Developer/Xcode/DerivedData",
+        "Developer/Xcode/Archives",
+        "Developer/Xcode/iOS DeviceSupport",
+        "Developer/Xcode/watchOS DeviceSupport",
+        "Developer/CoreSimulator/Devices",
+        "Developer/CoreSimulator/Caches",
+    };
+
+    /// Developer package manager caches
+    pub const dev_cache_dirs = [_][]const u8{
+        ".npm",
+        ".yarn",
+        ".pnpm-store",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        ".ivy2",
+        ".sbt",
+        ".coursier",
+        "go/pkg",
+        ".cache/pip",
+        ".cache/go-build",
+        ".cache/yarn",
+        ".cocoapods",
+        "Library/Caches/CocoaPods",
+        "Library/Caches/Homebrew",
+        ".pub-cache",
+        ".dartServer",
+        ".android",
     };
 };
 

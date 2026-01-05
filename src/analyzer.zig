@@ -374,6 +374,17 @@ pub const Analyzer = struct {
             return true;
         }
 
+        // macOS junk files (.DS_Store, ._, etc.)
+        for (config.FilePatterns.macos_junk) |junk| {
+            if (std.mem.eql(u8, name, junk)) {
+                return true;
+            }
+            // Check for resource fork files (._filename)
+            if (std.mem.startsWith(u8, name, junk)) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -400,6 +411,29 @@ pub const Analyzer = struct {
 
         for (cache_patterns) |pattern| {
             if (std.mem.indexOf(u8, path, pattern) != null) {
+                return true;
+            }
+        }
+
+        // macOS-specific: ~/Library/Caches/
+        if (std.mem.indexOf(u8, path, "/Library/Caches/") != null) {
+            return true;
+        }
+
+        // macOS-specific waste directories
+        for (config.FilePatterns.macos_library_waste) |waste_dir| {
+            var buf: [256]u8 = undefined;
+            const pattern = std.fmt.bufPrint(&buf, "/Library/{s}/", .{waste_dir}) catch continue;
+            if (std.mem.indexOf(u8, path, pattern) != null) {
+                return true;
+            }
+        }
+
+        // Developer package manager caches
+        for (config.FilePatterns.dev_cache_dirs) |cache_dir| {
+            var buf: [256]u8 = undefined;
+            const with_slash = std.fmt.bufPrint(&buf, "/{s}/", .{cache_dir}) catch continue;
+            if (std.mem.indexOf(u8, path, with_slash) != null) {
                 return true;
             }
         }
@@ -474,22 +508,16 @@ pub const Analyzer = struct {
         const path = file.path;
 
         for (config.FilePatterns.dev_artifact_dirs) |artifact_dir| {
-            // Check if path contains the artifact directory
-            const patterns = [_][]const u8{
-                artifact_dir,
-            };
-            for (patterns) |pattern| {
-                // Build patterns with separators
-                var buf: [256]u8 = undefined;
-                const with_slash = std.fmt.bufPrint(&buf, "/{s}/", .{pattern}) catch continue;
-                if (std.mem.indexOf(u8, path, with_slash) != null) {
-                    return true;
-                }
+            // Build patterns with separators
+            var buf: [256]u8 = undefined;
+            const with_slash = std.fmt.bufPrint(&buf, "/{s}/", .{artifact_dir}) catch continue;
+            if (std.mem.indexOf(u8, path, with_slash) != null) {
+                return true;
+            }
 
-                const with_backslash = std.fmt.bufPrint(&buf, "\\{s}\\", .{pattern}) catch continue;
-                if (std.mem.indexOf(u8, path, with_backslash) != null) {
-                    return true;
-                }
+            const with_backslash = std.fmt.bufPrint(&buf, "\\{s}\\", .{artifact_dir}) catch continue;
+            if (std.mem.indexOf(u8, path, with_backslash) != null) {
+                return true;
             }
         }
 
@@ -504,11 +532,30 @@ pub const Analyzer = struct {
                 ".dll",
                 ".so",
                 ".dylib",
+                ".a",
+                ".lib",
+                ".pdb",
             };
             for (compiled_exts) |comp_ext| {
                 if (std.ascii.eqlIgnoreCase(ext, comp_ext)) {
                     return true;
                 }
+            }
+        }
+
+        // Xcode-specific directories
+        const xcode_patterns = [_][]const u8{
+            "/DerivedData/",
+            "/Build/Intermediates/",
+            "/Build/Products/",
+            "/ModuleCache/",
+            "/iOS DeviceSupport/",
+            "/watchOS DeviceSupport/",
+            "/CoreSimulator/",
+        };
+        for (xcode_patterns) |pattern| {
+            if (std.mem.indexOf(u8, path, pattern) != null) {
+                return true;
             }
         }
 
@@ -592,10 +639,10 @@ pub const Analyzer = struct {
 
     /// Get results filtered by category
     pub fn getResultsByCategory(self: *Analyzer, category: FileCategory) !std.ArrayList(AnalysisResult) {
-        var filtered = std.ArrayList(AnalysisResult).init(self.allocator);
+        var filtered = std.ArrayList(AnalysisResult){};
         for (self.results.items) |result| {
             if (result.hasCategory(category)) {
-                try filtered.append(result);
+                try filtered.append(self.allocator, result);
             }
         }
         return filtered;

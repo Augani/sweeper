@@ -139,6 +139,12 @@ pub const InputReader = struct {
         };
     }
 
+    pub fn initWithFile(file: std.fs.File) InputReader {
+        return InputReader{
+            .stdin = file,
+        };
+    }
+
     /// Read next input event (non-blocking if terminal is in raw mode)
     pub fn readKey(self: *InputReader) Key {
         // Read bytes
@@ -352,23 +358,25 @@ pub const Event = union(enum) {
 
 /// Event queue for buffering events
 pub const EventQueue = struct {
-    events: std.ArrayList(Event),
+    allocator: std.mem.Allocator,
+    events: std.ArrayListUnmanaged(Event),
     input: InputReader,
 
     pub fn init(allocator: std.mem.Allocator) EventQueue {
         return EventQueue{
-            .events = std.ArrayList(Event).init(allocator),
+            .allocator = allocator,
+            .events = .{},
             .input = InputReader.init(),
         };
     }
 
     pub fn deinit(self: *EventQueue) void {
-        self.events.deinit();
+        self.events.deinit(self.allocator);
     }
 
     /// Push an event to the queue
     pub fn push(self: *EventQueue, event: Event) !void {
-        try self.events.append(event);
+        try self.events.append(self.allocator, event);
     }
 
     /// Pop an event from the queue

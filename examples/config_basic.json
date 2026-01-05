@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "scan_paths": [
+    "/tmp",
+    "~/Downloads",
+    "~/Desktop"
+  ],
+  "exclude_patterns": [
+    ".git",
+    ".ssh",
+    "node_modules",
+    "*.app",
+    "*.exe"
+  ],
+  "min_file_size": 0,
+  "max_file_age_days": 30,
+  "show_hidden": false,
+  "use_trash": true,
+  "categories": {
+    "temp_files": true,
+    "cache_files": true,
+    "log_files": true,
+    "old_downloads": true,
+    "duplicates": true,
+    "large_files": true,
+    "dev_artifacts": false,
+    "browser_data": false
+  },
+  "analyzer": {
+    "large_file_threshold": 104857600,
+    "unused_days_threshold": 90,
+    "old_download_days": 30,
+    "detect_duplicates": true,
+    "max_hash_size": 1073741824
+  },
+  "custom_rules": []
+}

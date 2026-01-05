@@ -27,8 +27,8 @@ You are an expert debugger for this project.
 ```
 
 ## Project Context
-**Languages**: Markdown (5 files), JSON (1 files)
-**Key Directories**: .zig-cache/, .claude/, zig-out/, .git/, src/
+**Languages**: Markdown (13 files), JSON (5 files), Shell (1 files)
+**Key Directories**: .zig-cache/, tests/, .claude/, docs/, zig-out/
 
 
 When debugging, use Grep to search for error messages and patterns.

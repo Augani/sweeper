@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-macos
+            name: macos-arm64
+            ext: tar.gz
+          - os: macos-15
+            target: x86_64-macos
+            name: macos-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-linux-gnu
+            name: linux-x64
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-windows-gnu
+            name: windows-x64
+            ext: zip
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.0
+      
+      - name: Build
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+      
+      - name: Package (Unix)
+        if: matrix.os \!= 'windows-latest'
+        run: |
+          mkdir -p sweeper-${{ matrix.name }}
+          cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
+          cp zig-out/bin/sweeper sweeper-${{ matrix.name }}/ || true
+          cp -r resources sweeper-${{ matrix.name }}/ || true
+          cp README.md LICENSE sweeper-${{ matrix.name }}/
+          tar -czvf sweeper-${{ matrix.name }}.${{ matrix.ext }} sweeper-${{ matrix.name }}
+      
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sweeper-${{ matrix.name }}
+          Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          Copy-Item zig-out/bin/sweeper.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse resources sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          Copy-Item README.md,LICENSE sweeper-${{ matrix.name }}/
+          Compress-Archive -Path sweeper-${{ matrix.name }} -DestinationPath sweeper-${{ matrix.name }}.${{ matrix.ext }}
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweeper-${{ matrix.name }}
+          path: sweeper-${{ matrix.name }}.${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false

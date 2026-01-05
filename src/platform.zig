@@ -55,37 +55,63 @@ pub const Paths = struct {
     pub fn get(allocator: std.mem.Allocator) !Paths {
         const platform = Platform.current();
 
-        const home = std.posix.getenv("HOME") orelse switch (platform) {
-            .windows => std.posix.getenv("USERPROFILE") orelse "C:\\Users\\Default",
+        // Cross-platform home directory detection
+        const home = getHomeDir(allocator) catch switch (platform) {
+            .windows => "C:\\Users\\Default",
+            else => "/tmp",
+        };
+
+        // Cross-platform temp directory
+        const temp = getTempDir(allocator) catch switch (platform) {
+            .windows => "C:\\Windows\\Temp",
             else => "/tmp",
         };
 
         return switch (platform) {
             .macos => Paths{
                 .home = home,
-                .temp = "/tmp",
+                .temp = temp,
                 .cache = try std.fmt.allocPrint(allocator, "{s}/Library/Caches", .{home}),
                 .trash = try std.fmt.allocPrint(allocator, "{s}/.Trash", .{home}),
             },
             .windows => Paths{
                 .home = home,
-                .temp = std.posix.getenv("TEMP") orelse "C:\\Windows\\Temp",
+                .temp = temp,
                 .cache = try std.fmt.allocPrint(allocator, "{s}\\AppData\\Local\\Temp", .{home}),
                 .trash = try std.fmt.allocPrint(allocator, "{s}\\$Recycle.Bin", .{home}),
             },
             .linux => Paths{
                 .home = home,
-                .temp = "/tmp",
+                .temp = temp,
                 .cache = try std.fmt.allocPrint(allocator, "{s}/.cache", .{home}),
                 .trash = try std.fmt.allocPrint(allocator, "{s}/.local/share/Trash", .{home}),
             },
             .unknown => Paths{
                 .home = home,
-                .temp = "/tmp",
+                .temp = temp,
                 .cache = "/tmp",
                 .trash = "/tmp/trash",
             },
         };
+    }
+
+    /// Get home directory cross-platform
+    fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
+        if (builtin.os.tag == .windows) {
+            return std.process.getEnvVarOwned(allocator, "USERPROFILE");
+        } else {
+            return std.process.getEnvVarOwned(allocator, "HOME");
+        }
+    }
+
+    /// Get temp directory cross-platform
+    fn getTempDir(allocator: std.mem.Allocator) ![]const u8 {
+        if (builtin.os.tag == .windows) {
+            return std.process.getEnvVarOwned(allocator, "TEMP") catch
+                std.process.getEnvVarOwned(allocator, "TMP");
+        } else {
+            return allocator.dupe(u8, "/tmp");
+        }
     }
 
     pub fn deinit(self: *Paths, allocator: std.mem.Allocator) void {

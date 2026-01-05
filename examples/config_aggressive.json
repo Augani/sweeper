@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "scan_paths": [
+    "~/Downloads",
+    "~/Desktop",
+    "~/Documents",
+    "/tmp",
+    "~/Library/Caches"
+  ],
+  "exclude_patterns": [
+    ".git",
+    ".ssh",
+    ".gnupg",
+    "*.app",
+    "*.exe",
+    "System"
+  ],
+  "min_file_size": 0,
+  "max_file_age_days": 7,
+  "show_hidden": false,
+  "use_trash": true,
+  "categories": {
+    "temp_files": true,
+    "cache_files": true,
+    "log_files": true,
+    "old_downloads": true,
+    "duplicates": true,
+    "large_files": true,
+    "dev_artifacts": true,
+    "browser_data": true
+  },
+  "analyzer": {
+    "large_file_threshold": 52428800,
+    "unused_days_threshold": 30,
+    "old_download_days": 7,
+    "detect_duplicates": true,
+    "max_hash_size": 1073741824
+  },
+  "custom_rules": [
+    {
+      "name": "old_temp_files",
+      "description": "Temporary files older than 3 days",
+      "type": "age_days",
+      "pattern": "",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "age_min": 3,
+      "category": "temporary"
+    },
+    {
+      "name": "screenshot_files",
+      "description": "Screenshots older than 14 days",
+      "type": "name_pattern",
+      "pattern": "Screenshot*.png",
+      "action": "mark_safe",
+      "priority": 60,
+      "enabled": true,
+      "category": "old_download"
+    },
+    {
+      "name": "downloads_old",
+      "description": "Files in Downloads older than 7 days",
+      "type": "age_days",
+      "pattern": "",
+      "action": "categorize",
+      "priority": 70,
+      "enabled": true,
+      "age_min": 7,
+      "category": "old_download"
+    },
+    {
+      "name": "exclude_important_docs",
+      "description": "Never delete important document types",
+      "type": "extension",
+      "pattern": ".pdf",
+      "action": "mark_unsafe",
+      "priority": 90,
+      "enabled": true
+    },
+    {
+      "name": "exclude_archives",
+      "description": "Protect archive files",
+      "type": "extension",
+      "pattern": ".zip",
+      "action": "mark_unsafe",
+      "priority": 85,
+      "enabled": true
+    }
+  ]
+}

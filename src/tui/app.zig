@@ -8,6 +8,9 @@ const platform_mod = @import("../platform.zig");
 const scanner_mod = @import("../scanner.zig");
 const analyzer_mod = @import("../analyzer.zig");
 const config_mod = @import("../config.zig");
+const deleter_mod = @import("../deleter.zig");
+const history_mod = @import("../history.zig");
+const space_tracker_mod = @import("../space_tracker.zig");
 
 const Terminal = terminal.Terminal;
 const Renderer = render.Renderer;
@@ -35,7 +38,11 @@ pub const View = enum {
     results,
     details,
     confirm_delete,
+    deleting,
+    undo_confirm,
+    history,
     help,
+    space_report,
 };
 
 /// Application state
@@ -48,11 +55,20 @@ pub const AppState = struct {
     total_size: u64 = 0,
     selected_size: u64 = 0,
     scan_progress: f32 = 0.0,
+    delete_progress: f32 = 0.0,
     status_message: []const u8 = "",
     is_scanning: bool = false,
+    is_deleting: bool = false,
     show_help: bool = false,
     active_tab: usize = 0,
     filter_category: ?analyzer_mod.FileCategory = null,
+    use_trash: bool = true,
+    dry_run: bool = false,
+    last_delete_count: u64 = 0,
+    last_delete_size: u64 = 0,
+    history_scroll: usize = 0,
+    space_tracker: ?*space_tracker_mod.SpaceTracker = null,
+    show_space_report: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) AppState {
         return AppState{
@@ -62,6 +78,15 @@ pub const AppState = struct {
     }
 
     pub fn deinit(self: *AppState) void {
+        // Free duplicated path strings
+        for (self.files.items) |file| {
+            // Only free paths that were dynamically allocated (not string literals)
+            // We can't easily tell the difference, so we track that paths from real scans
+            // are allocated. For safety, we check if it's within heap range.
+            // Actually, the simplest approach: paths from performRealScan are allocated,
+            // demo files use string literals. Since we now use real scanning, free all.
+            self.allocator.free(file.path);
+        }
         self.files.deinit(self.allocator);
     }
 
@@ -149,13 +174,23 @@ pub const App = struct {
     renderer: Renderer,
     state: AppState,
     input_reader: input.InputReader,
+    deleter: ?deleter_mod.Deleter,
     running: bool = true,
 
     pub fn init(allocator: std.mem.Allocator) !App {
         var term = try Terminal.init();
         errdefer term.deinit();
 
-        var renderer = try Renderer.init(allocator, &term);
+        // Initialize deleter with default options
+        var deleter = try deleter_mod.Deleter.init(allocator, .{
+            .use_trash = true,
+            .dry_run = false,
+        });
+        errdefer deleter.deinit();
+
+        // Initialize renderer with terminal's tty handle and size
+        // (file handles are copyable, so this is safe across moves)
+        var renderer = try Renderer.init(allocator, term.tty, term.size.width, term.size.height);
         errdefer renderer.deinit();
 
         return App{
@@ -163,11 +198,15 @@ pub const App = struct {
             .term = term,
             .renderer = renderer,
             .state = AppState.init(allocator),
-            .input_reader = input.InputReader.init(),
+            .input_reader = input.InputReader.initWithFile(term.tty),
+            .deleter = deleter,
         };
     }
 
     pub fn deinit(self: *App) void {
+        if (self.deleter) |*d| {
+            d.deinit();
+        }
         self.state.deinit();
         self.renderer.deinit();
         self.term.deinit();
@@ -175,9 +214,19 @@ pub const App = struct {
 
     /// Start the TUI application
     pub fn run(self: *App) !void {
-        // Setup terminal
+        // Setup terminal with deferred cleanup to ensure restoration on any exit
         try self.term.enableRawMode();
+        defer self.term.disableRawMode();
+
         self.term.enterAltScreen();
+        defer {
+            // Clean exit sequence: reset style, clear screen, show cursor, leave alt screen
+            self.term.resetStyle();
+            self.term.clear();
+            self.term.showCursor();
+            self.term.leaveAltScreen();
+        }
+
         self.term.hideCursor();
         self.term.clear();
 
@@ -191,11 +240,6 @@ pub const App = struct {
             const key = self.input_reader.readKey();
             self.handleInput(key);
         }
-
-        // Cleanup
-        self.term.showCursor();
-        self.term.leaveAltScreen();
-        self.term.disableRawMode();
     }
 
     /// Handle input events
@@ -223,8 +267,12 @@ pub const App = struct {
         switch (self.state.view) {
             .main, .results => self.handleMainInput(key),
             .scanning => {}, // No input during scan
+            .deleting => {}, // No input during delete
             .confirm_delete => self.handleConfirmInput(key),
+            .undo_confirm => self.handleUndoConfirmInput(key),
+            .history => self.handleHistoryInput(key),
             .details => self.handleDetailsInput(key),
+            .space_report => self.handleSpaceReportInput(key),
             .help => {
                 if (key.isEscape() or key.isEnter()) {
                     self.state.view = .results;
@@ -249,7 +297,7 @@ pub const App = struct {
                 },
                 .enter => self.state.view = .details,
                 .tab => {
-                    self.state.active_tab = (self.state.active_tab + 1) % 4;
+                    self.state.active_tab = (self.state.active_tab + 1) % 5;
                 },
                 else => {},
             },
@@ -261,6 +309,24 @@ pub const App = struct {
                     if (self.state.getSelectedCount() > 0) {
                         self.state.view = .confirm_delete;
                     }
+                },
+                'u' => {
+                    // Undo last operation
+                    self.state.view = .undo_confirm;
+                },
+                'h' => {
+                    // Show history
+                    self.state.view = .history;
+                    self.state.history_scroll = 0;
+                },
+                'r' => {
+                    // Show space report
+                    self.state.view = .space_report;
+                },
+                't' => {
+                    // Toggle trash mode
+                    self.state.use_trash = !self.state.use_trash;
+                    self.state.status_message = if (self.state.use_trash) "Trash mode: ON" else "Trash mode: OFF (permanent delete)";
                 },
                 's' => self.state.view = .scanning,
                 'j' => self.state.moveDown(),
@@ -281,9 +347,8 @@ pub const App = struct {
         switch (key) {
             .char => |c| switch (c) {
                 'y', 'Y' => {
-                    // Would perform deletion here
-                    self.state.status_message = "Files deleted (simulated)";
-                    self.state.view = .results;
+                    // Perform actual deletion
+                    self.performDelete();
                 },
                 'n', 'N' => self.state.view = .results,
                 else => {},
@@ -297,8 +362,188 @@ pub const App = struct {
         }
     }
 
+    /// Handle input in undo confirm view
+    fn handleUndoConfirmInput(self: *App, key: Key) void {
+        switch (key) {
+            .char => |c| switch (c) {
+                'y', 'Y' => {
+                    self.performUndo();
+                },
+                'n', 'N' => self.state.view = .results,
+                else => {},
+            },
+            .special => |s| {
+                if (s == .escape) {
+                    self.state.view = .results;
+                }
+            },
+            else => {},
+        }
+    }
+
+    /// Handle input in history view
+    fn handleHistoryInput(self: *App, key: Key) void {
+        switch (key) {
+            .special => |s| switch (s) {
+                .up => {
+                    if (self.state.history_scroll > 0) {
+                        self.state.history_scroll -= 1;
+                    }
+                },
+                .down => {
+                    self.state.history_scroll += 1;
+                },
+                .escape => self.state.view = .results,
+                else => {},
+            },
+            .char => |c| switch (c) {
+                'q' => self.state.view = .results,
+                'j' => self.state.history_scroll += 1,
+                'k' => {
+                    if (self.state.history_scroll > 0) {
+                        self.state.history_scroll -= 1;
+                    }
+                },
+                else => {},
+            },
+            else => {},
+        }
+    }
+
+    /// Perform the actual deletion of selected files
+    fn performDelete(self: *App) void {
+        if (self.deleter == null) {
+            self.state.status_message = "Deleter not initialized";
+            self.state.view = .results;
+            return;
+        }
+
+        var del = &self.deleter.?;
+
+        // Update deleter options based on state
+        del.options.use_trash = self.state.use_trash;
+        del.options.dry_run = self.state.dry_run;
+
+        var deleted_count: u64 = 0;
+        var deleted_size: u64 = 0;
+        var failed_count: u64 = 0;
+
+        // Delete selected files
+        var i: usize = 0;
+        while (i < self.state.files.items.len) {
+            if (self.state.files.items[i].selected) {
+                const file = self.state.files.items[i];
+                var result = del.deleteFile(file.path) catch {
+                    failed_count += 1;
+                    i += 1;
+                    continue;
+                };
+                defer result.deinit(self.allocator);
+
+                if (result.success) {
+                    deleted_count += 1;
+                    deleted_size += result.bytes_freed;
+                    // Remove from list
+                    _ = self.state.files.orderedRemove(i);
+                    // Don't increment i since we removed an item
+                } else {
+                    failed_count += 1;
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        // Update state
+        self.state.last_delete_count = deleted_count;
+        self.state.last_delete_size = deleted_size;
+        self.state.selected_size = 0;
+
+        // Adjust selected index if necessary
+        if (self.state.selected_index >= self.state.files.items.len and self.state.files.items.len > 0) {
+            self.state.selected_index = self.state.files.items.len - 1;
+        }
+
+        // Set status message
+        if (failed_count == 0) {
+            self.state.status_message = if (self.state.use_trash)
+                "Files moved to trash. Press [u] to undo."
+            else
+                "Files permanently deleted.";
+        } else {
+            self.state.status_message = "Some files failed to delete.";
+        }
+
+        self.state.view = .results;
+    }
+
+    /// Perform undo of last operation
+    fn performUndo(self: *App) void {
+        if (self.deleter == null) {
+            self.state.status_message = "No operations to undo";
+            self.state.view = .results;
+            return;
+        }
+
+        var del = &self.deleter.?;
+
+        const result = del.undo() catch {
+            self.state.status_message = "Undo failed";
+            self.state.view = .results;
+            return;
+        };
+
+        if (result) |undo_result_const| {
+            // Make a mutable copy for deinit
+            var undo_result = undo_result_const;
+
+            if (undo_result.success) {
+                // Duplicate the path before undo_result is freed
+                const path_copy = self.allocator.dupe(u8, undo_result.path) catch {
+                    undo_result.deinit(self.allocator);
+                    self.state.status_message = "File restored (path not tracked)";
+                    self.state.view = .results;
+                    return;
+                };
+                const name = std.fs.path.basename(path_copy);
+
+                // Now we can free undo_result
+                undo_result.deinit(self.allocator);
+
+                // Re-add file to the list with duplicated path
+                self.state.files.append(self.allocator, FileItem{
+                    .path = path_copy,
+                    .name = name,
+                    .size = 0, // Size unknown after restore
+                    .category = .normal,
+                    .selected = false,
+                    .confidence = 0.0,
+                }) catch {
+                    self.allocator.free(path_copy);
+                };
+
+                self.state.status_message = "File restored from trash";
+            } else {
+                undo_result.deinit(self.allocator);
+                self.state.status_message = "Failed to restore file";
+            }
+        } else {
+            self.state.status_message = "No operations to undo";
+        }
+
+        self.state.view = .results;
+    }
+
     /// Handle input in details view
     fn handleDetailsInput(self: *App, key: Key) void {
+        if (key.isEscape() or key.isEnter() or key.isCharKey('q')) {
+            self.state.view = .results;
+        }
+    }
+
+    /// Handle input in space report view
+    fn handleSpaceReportInput(self: *App, key: Key) void {
         if (key.isEscape() or key.isEnter() or key.isCharKey('q')) {
             self.state.view = .results;
         }
@@ -318,8 +563,12 @@ pub const App = struct {
             switch (self.state.view) {
                 .main, .results => self.drawMainView(buf, area),
                 .scanning => self.drawScanningView(buf, area),
+                .deleting => self.drawDeletingView(buf, area),
                 .confirm_delete => self.drawConfirmView(buf, area),
+                .undo_confirm => self.drawUndoConfirmView(buf, area),
+                .history => self.drawHistoryView(buf, area),
                 .details => self.drawDetailsView(buf, area),
+                .space_report => self.drawSpaceReportView(buf, area),
                 .help => self.drawHelp(buf, area),
             }
         }
@@ -330,8 +579,8 @@ pub const App = struct {
         // Title bar
         self.drawTitleBar(buf, Rect{ .x = area.x, .y = area.y, .width = area.width, .height = 1 });
 
-        // Tabs
-        const tab_labels = [_][]const u8{ "All", "Temp", "Cache", "Large" };
+        // Tabs - updated to more useful categories
+        const tab_labels = [_][]const u8{ "All", "Largest", "Cache", "Dev", "Temp" };
         var tabs = widgets.Tabs{
             .labels = &tab_labels,
             .active = self.state.active_tab,
@@ -356,8 +605,33 @@ pub const App = struct {
         });
 
         // Help hint
-        const help_text = "[?] Help  [Space] Select  [d] Delete  [q] Quit";
+        const trash_indicator = if (self.state.use_trash) "[Trash]" else "[Perm]";
+        var hint_buf: [96]u8 = undefined;
+        const help_text = std.fmt.bufPrint(&hint_buf, "[?] Help [Tab] Tabs [Space] Select [d] Delete [u] Undo [t] {s}", .{trash_indicator}) catch "[?] Help";
         buf.drawString(area.x + 1, area.y + area.height - 1, help_text, Style.default.withFg(.cyan));
+    }
+
+    /// Check if file matches current tab filter
+    fn matchesCurrentTab(self: *App, file: FileItem) bool {
+        return switch (self.state.active_tab) {
+            0 => true, // All
+            1 => file.size >= 50 * 1024 * 1024, // Largest (>50MB)
+            2 => file.category == .cache, // Cache
+            3 => file.category == .dev_artifact, // Dev
+            4 => file.category == .temporary, // Temp
+            else => true,
+        };
+    }
+
+    /// Get filtered file count for current tab
+    fn getFilteredCount(self: *App) usize {
+        if (self.state.active_tab == 0) return self.state.files.items.len;
+
+        var count: usize = 0;
+        for (self.state.files.items) |file| {
+            if (self.matchesCurrentTab(file)) count += 1;
+        }
+        return count;
     }
 
     /// Draw title bar
@@ -370,9 +644,17 @@ pub const App = struct {
 
     /// Draw file list
     fn drawFileList(self: *App, buf: *Buffer, area: Rect) void {
-        // Panel border
+        // Panel border with tab-specific title
+        const panel_title = switch (self.state.active_tab) {
+            0 => "All Files",
+            1 => "Largest Files (>50MB)",
+            2 => "Cache Files",
+            3 => "Dev Artifacts",
+            4 => "Temporary Files",
+            else => "Files",
+        };
         const panel = widgets.Panel{
-            .title = "Files",
+            .title = panel_title,
             .border = .single,
         };
         panel.draw(buf, area);
@@ -380,27 +662,50 @@ pub const App = struct {
         const inner = panel.innerRect(area);
         if (inner.width == 0 or inner.height == 0) return;
 
+        // Build filtered indices
+        var filtered_indices: [4096]usize = undefined;
+        var filtered_count: usize = 0;
+        for (self.state.files.items, 0..) |file, idx| {
+            if (self.matchesCurrentTab(file)) {
+                if (filtered_count < filtered_indices.len) {
+                    filtered_indices[filtered_count] = idx;
+                    filtered_count += 1;
+                }
+            }
+        }
+
+        // Clamp selected_index to filtered range
+        if (filtered_count > 0 and self.state.selected_index >= filtered_count) {
+            self.state.selected_index = filtered_count - 1;
+        }
+
         // Ensure scroll keeps selected item visible
+        const visible_height = inner.height - 1;
         if (self.state.selected_index < self.state.scroll_offset) {
             self.state.scroll_offset = self.state.selected_index;
-        } else if (self.state.selected_index >= self.state.scroll_offset + inner.height) {
-            self.state.scroll_offset = self.state.selected_index - inner.height + 1;
+        } else if (self.state.selected_index >= self.state.scroll_offset + visible_height) {
+            self.state.scroll_offset = self.state.selected_index - visible_height + 1;
         }
 
         // Draw header
         const header = "   Size      Category    Name";
         buf.drawString(inner.x, inner.y, header, Style.default.withBold());
 
-        // Draw items
-        const visible_height = inner.height - 1;
+        // Show empty message if no files match filter
+        if (filtered_count == 0) {
+            buf.drawString(inner.x + 2, inner.y + 2, "No files match this filter", Style.default.withFg(.yellow));
+            return;
+        }
+
+        // Draw filtered items
         var y: u16 = 0;
-
         while (y < visible_height) : (y += 1) {
-            const idx = self.state.scroll_offset + y;
-            if (idx >= self.state.files.items.len) break;
+            const filtered_idx = self.state.scroll_offset + y;
+            if (filtered_idx >= filtered_count) break;
 
-            const file = self.state.files.items[idx];
-            const is_selected = idx == self.state.selected_index;
+            const actual_idx = filtered_indices[filtered_idx];
+            const file = self.state.files.items[actual_idx];
+            const is_selected = filtered_idx == self.state.selected_index;
 
             const row_style = if (is_selected) Style.default.withReverse() else Style.default;
 
@@ -428,11 +733,19 @@ pub const App = struct {
             buf.drawStringMax(inner.x + 26, inner.y + y + 1, file.name, name_max, row_style);
         }
 
-        // Scroll indicator
-        if (self.state.files.items.len > visible_height) {
-            const scrollbar_height = @max(1, (visible_height * visible_height) / @as(u16, @intCast(self.state.files.items.len)));
-            const scrollbar_pos = if (self.state.files.items.len > visible_height)
-                @as(u16, @intCast((self.state.scroll_offset * (visible_height - scrollbar_height)) / (self.state.files.items.len - visible_height)))
+        // Scroll indicator (use filtered_count for proper scroll bar)
+        if (filtered_count > visible_height and visible_height > 0) {
+            // Calculate scrollbar size (minimum 1 cell)
+            const scrollbar_height = @max(1, (visible_height * visible_height) / @as(u16, @intCast(filtered_count)));
+
+            // Calculate scrollbar position safely (avoid division by zero)
+            const scroll_range = filtered_count - visible_height;
+            const track_range = visible_height -| scrollbar_height; // Saturating subtract
+            const scrollbar_pos: u16 = if (scroll_range > 0 and track_range > 0)
+                @as(u16, @intCast(@min(
+                    track_range,
+                    (self.state.scroll_offset * track_range) / scroll_range,
+                )))
             else
                 0;
 
@@ -467,31 +780,57 @@ pub const App = struct {
     /// Draw scanning view
     fn drawScanningView(self: *App, buf: *Buffer, area: Rect) void {
         const panel = widgets.Panel{
-            .title = "Scanning",
+            .title = "Scanning Filesystem",
             .border = .double,
+            .border_style = Style.default.withFg(.cyan),
         };
         panel.draw(buf, area);
 
         const inner = panel.innerRect(area);
-        const center_y = inner.y + inner.height / 2;
+        var y = inner.y + inner.height / 2 - 5;
 
-        // Scanning message
-        buf.drawString(inner.x + (inner.width - 20) / 2, center_y - 2, "Scanning filesystem...", Style.default.withBold());
+        // Scanning message with spinner
+        const spinner_chars = [_]u21{ '|', '/', '-', '\\' };
+        const spinner_idx = @as(usize, @intCast(std.time.timestamp())) % spinner_chars.len;
+        buf.setChar(inner.x + (inner.width - 25) / 2, y, spinner_chars[spinner_idx], Style.default.withFg(.cyan));
+        buf.drawString(inner.x + (inner.width - 23) / 2 + 2, y, "Scanning filesystem...", Style.default.withBold());
+        y += 2;
+
+        // Statistics
+        var stats_buf: [64]u8 = undefined;
+        const files_text = std.fmt.bufPrint(&stats_buf, "Files found: {d}", .{self.state.files.items.len}) catch "";
+        buf.drawString(inner.x + 4, y, files_text, Style.default);
+        y += 1;
+
+        var size_buf: [32]u8 = undefined;
+        const size_str = formatSizeCompact(self.state.total_size, &size_buf);
+        var total_text_buf: [64]u8 = undefined;
+        const total_text = std.fmt.bufPrint(&total_text_buf, "Total size: {s}", .{size_str}) catch "";
+        buf.drawString(inner.x + 4, y, total_text, Style.default);
+        y += 2;
 
         // Progress bar
         var progress = widgets.ProgressBar{
             .progress = self.state.scan_progress,
             .filled_style = Style.default.withFg(.cyan),
+            .show_percentage = true,
         };
         progress.draw(buf, Rect{
             .x = inner.x + 2,
-            .y = center_y,
+            .y = y,
             .width = inner.width - 4,
             .height = 1,
         });
+        y += 2;
+
+        // Rate information
+        var rate_buf: [64]u8 = undefined;
+        const rate_text = std.fmt.bufPrint(&rate_buf, "Processing... {d:.0} files/sec", .{@as(f64, 100.0)}) catch "";
+        buf.drawString(inner.x + (inner.width - @as(u16, @intCast(@min(rate_text.len, inner.width)))) / 2, y, rate_text, Style.default.withFg(.green));
+        y += 2;
 
         // Cancel hint
-        buf.drawString(inner.x + (inner.width - 22) / 2, center_y + 2, "Press Ctrl+C to cancel", Style.default.withFg(.yellow));
+        buf.drawString(inner.x + (inner.width - 22) / 2, y, "Press Ctrl+C to cancel", Style.default.withFg(.yellow));
     }
 
     /// Draw confirm delete view
@@ -533,6 +872,164 @@ pub const App = struct {
         // Options
         buf.drawString(inner.x + inner.width / 4, inner.y + 3, "[Y]es", Style.default.withFg(.green));
         buf.drawString(inner.x + inner.width * 3 / 4 - 4, inner.y + 3, "[N]o", Style.default.withFg(.red));
+
+        // Show trash/permanent indicator
+        const mode_text = if (self.state.use_trash) "(Move to Trash)" else "(Permanent Delete!)";
+        const mode_style = if (self.state.use_trash) Style.default.withFg(.cyan) else Style.default.withFg(.red).withBold();
+        buf.drawString(inner.x + (inner.width - @as(u16, @intCast(mode_text.len))) / 2, inner.y + 2, mode_text, mode_style);
+    }
+
+    /// Draw undo confirm view
+    fn drawUndoConfirmView(self: *App, buf: *Buffer, area: Rect) void {
+        // Draw background
+        self.drawMainView(buf, area);
+
+        // Draw dialog box
+        const dialog_width: u16 = 50;
+        const dialog_height: u16 = 7;
+        const dialog_x = (area.width - dialog_width) / 2;
+        const dialog_y = (area.height - dialog_height) / 2;
+
+        const dialog_rect = Rect{
+            .x = dialog_x,
+            .y = dialog_y,
+            .width = dialog_width,
+            .height = dialog_height,
+        };
+
+        // Fill background
+        buf.fillRect(dialog_rect, ' ', Style.default);
+
+        // Draw border
+        const panel = widgets.Panel{
+            .title = "Undo Last Delete",
+            .border = .double,
+            .border_style = Style.default.withFg(.cyan),
+        };
+        panel.draw(buf, dialog_rect);
+
+        const inner = panel.innerRect(dialog_rect);
+
+        // Check if there's something to undo
+        if (self.deleter) |*del| {
+            const undoable_count = del.getHistory().getUndoableCount();
+            if (undoable_count > 0) {
+                var msg_buf: [48]u8 = undefined;
+                const msg = std.fmt.bufPrint(&msg_buf, "Restore last deleted file? ({d} undoable)", .{undoable_count}) catch "Restore last deleted file?";
+                buf.drawString(inner.x + 2, inner.y + 1, msg, Style.default);
+
+                buf.drawString(inner.x + inner.width / 4, inner.y + 3, "[Y]es", Style.default.withFg(.green));
+                buf.drawString(inner.x + inner.width * 3 / 4 - 4, inner.y + 3, "[N]o", Style.default.withFg(.red));
+            } else {
+                buf.drawString(inner.x + 2, inner.y + 2, "No operations to undo", Style.default.withFg(.yellow));
+                buf.drawString(inner.x + inner.width / 2 - 8, inner.y + 4, "[Press any key]", Style.default.withFg(.cyan));
+            }
+        } else {
+            buf.drawString(inner.x + 2, inner.y + 2, "Deleter not available", Style.default.withFg(.red));
+        }
+    }
+
+    /// Draw deleting progress view
+    fn drawDeletingView(self: *App, buf: *Buffer, area: Rect) void {
+        const panel = widgets.Panel{
+            .title = "Deleting Files",
+            .border = .double,
+            .border_style = Style.default.withFg(.yellow),
+        };
+        panel.draw(buf, area);
+
+        const inner = panel.innerRect(area);
+        const center_y = inner.y + inner.height / 2;
+
+        // Deleting message
+        buf.drawString(inner.x + (inner.width - 20) / 2, center_y - 2, "Deleting files...", Style.default.withBold());
+
+        // Progress bar
+        var progress = widgets.ProgressBar{
+            .progress = self.state.delete_progress,
+            .filled_style = Style.default.withFg(.yellow),
+        };
+        progress.draw(buf, Rect{
+            .x = inner.x + 2,
+            .y = center_y,
+            .width = inner.width - 4,
+            .height = 1,
+        });
+
+        // Cancel hint
+        buf.drawString(inner.x + (inner.width - 22) / 2, center_y + 2, "Please wait...", Style.default.withFg(.cyan));
+    }
+
+    /// Draw history view
+    fn drawHistoryView(self: *App, buf: *Buffer, area: Rect) void {
+        const panel = widgets.Panel{
+            .title = "Deletion History",
+            .border = .single,
+            .border_style = Style.default.withFg(.cyan),
+        };
+        panel.draw(buf, area);
+
+        const inner = panel.innerRect(area);
+
+        // Header
+        buf.drawString(inner.x + 2, inner.y, "Operation              Path                                 Size", Style.default.withBold());
+
+        if (self.deleter) |*del| {
+            const history = del.getHistory();
+            const entries = history.getEntries();
+
+            if (entries.len == 0) {
+                buf.drawString(inner.x + 2, inner.y + 2, "No deletion history", Style.default.withFg(.yellow));
+            } else {
+                var y: u16 = 1;
+                const max_entries = inner.height - 3;
+                const start_idx = self.state.history_scroll;
+
+                for (entries[start_idx..]) |entry| {
+                    if (y >= max_entries) break;
+
+                    const op_name = entry.operation.getName();
+                    const basename = std.fs.path.basename(entry.original_path);
+
+                    var size_buf: [12]u8 = undefined;
+                    const size_str = formatSizeCompact(entry.file_size, &size_buf);
+
+                    const style = if (entry.undone) Style.default.withFg(.white) else Style.default;
+                    const status = if (entry.undone) " (undone)" else "";
+
+                    buf.drawStringMax(inner.x + 2, inner.y + y, op_name, 20, style);
+                    buf.drawStringMax(inner.x + 24, inner.y + y, basename, 36, style);
+                    buf.drawString(inner.x + 62, inner.y + y, size_str, style);
+
+                    if (entry.undone) {
+                        buf.drawString(inner.x + 72, inner.y + y, status, Style.default.withFg(.yellow));
+                    }
+
+                    y += 1;
+                }
+
+                // Show scroll indicator if needed
+                if (entries.len > max_entries) {
+                    var scroll_buf: [20]u8 = undefined;
+                    const scroll_info = std.fmt.bufPrint(&scroll_buf, "[{d}/{d}]", .{ start_idx + 1, entries.len }) catch "[?/?]";
+                    buf.drawString(inner.x + inner.width - 10, inner.y, scroll_info, Style.default.withFg(.cyan));
+                }
+            }
+
+            // Summary
+            const recoverable = history.getRecoverableSize();
+            var rec_buf: [16]u8 = undefined;
+            const rec_str = formatSizeCompact(recoverable, &rec_buf);
+
+            var summary_buf: [48]u8 = undefined;
+            const summary = std.fmt.bufPrint(&summary_buf, "Recoverable: {s} ({d} files)", .{ rec_str, history.getUndoableCount() }) catch "Recoverable: ???";
+            buf.drawString(inner.x + 2, inner.y + inner.height - 2, summary, Style.default.withFg(.green));
+        } else {
+            buf.drawString(inner.x + 2, inner.y + 2, "History not available", Style.default.withFg(.red));
+        }
+
+        // Controls hint
+        buf.drawString(inner.x + 2, inner.y + inner.height - 1, "[j/k] Scroll  [q/Esc] Close", Style.default.withFg(.cyan));
     }
 
     /// Draw details view
@@ -575,12 +1072,105 @@ pub const App = struct {
         buf.drawString(inner.x + 2, inner.y + inner.height - 2, "Press Enter or Escape to go back", Style.default.withFg(.cyan));
     }
 
+    /// Draw space report view
+    fn drawSpaceReportView(self: *App, buf: *Buffer, area: Rect) void {
+        const panel = widgets.Panel{
+            .title = "Space Analysis Report",
+            .border = .single,
+            .border_style = Style.default.withFg(.cyan),
+        };
+        panel.draw(buf, area);
+
+        const inner = panel.innerRect(area);
+        var y: u16 = 0;
+
+        // Overall statistics
+        buf.drawString(inner.x + 2, inner.y + y, "=== Overall Statistics ===", Style.default.withBold());
+        y += 2;
+
+        var total_buf: [32]u8 = undefined;
+        const total_str = formatSizeCompact(self.state.total_size, &total_buf);
+        buf.drawString(inner.x + 2, inner.y + y, "Total Space:", Style.default);
+        buf.drawString(inner.x + 20, inner.y + y, total_str, Style.default.withFg(.cyan));
+        y += 1;
+
+        var selected_buf: [32]u8 = undefined;
+        const selected_str = formatSizeCompact(self.state.selected_size, &selected_buf);
+        buf.drawString(inner.x + 2, inner.y + y, "Selected:", Style.default);
+        buf.drawString(inner.x + 20, inner.y + y, selected_str, Style.default.withFg(.green));
+        y += 1;
+
+        const sel_count = self.state.getSelectedCount();
+        var count_buf: [32]u8 = undefined;
+        const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{sel_count}) catch "?";
+        buf.drawString(inner.x + 2, inner.y + y, "Selected Files:", Style.default);
+        buf.drawString(inner.x + 20, inner.y + y, count_str, Style.default.withFg(.green));
+        y += 2;
+
+        // Percentage gauge
+        if (self.state.total_size > 0) {
+            var gauge = widgets.Gauge{
+                .value = self.state.selected_size,
+                .max_value = self.state.total_size,
+                .label = "Potential Savings",
+                .bar_style = Style.default.withFg(.green),
+            };
+            gauge.draw(buf, Rect{
+                .x = inner.x + 2,
+                .y = inner.y + y,
+                .width = inner.width - 4,
+                .height = 3,
+            });
+            y += 4;
+        }
+
+        // Category breakdown
+        if (y < inner.height - 2) {
+            buf.drawString(inner.x + 2, inner.y + y, "=== Category Breakdown ===", Style.default.withBold());
+            y += 2;
+
+            // Count files by category
+            var category_counts: [@typeInfo(analyzer_mod.FileCategory).@"enum".fields.len]u64 = [_]u64{0} ** @typeInfo(analyzer_mod.FileCategory).@"enum".fields.len;
+            var category_sizes: [@typeInfo(analyzer_mod.FileCategory).@"enum".fields.len]u64 = [_]u64{0} ** @typeInfo(analyzer_mod.FileCategory).@"enum".fields.len;
+
+            for (self.state.files.items) |file| {
+                const idx = @intFromEnum(file.category);
+                category_counts[idx] += 1;
+                category_sizes[idx] += file.size;
+            }
+
+            // Display categories
+            inline for (@typeInfo(analyzer_mod.FileCategory).@"enum".fields, 0..) |field, i| {
+                if (y >= inner.height - 1) break;
+                if (category_counts[i] > 0) {
+                    const cat: analyzer_mod.FileCategory = @enumFromInt(i);
+                    var cat_size_buf: [16]u8 = undefined;
+                    const cat_size_str = formatSizeCompact(category_sizes[i], &cat_size_buf);
+
+                    var cat_info_buf: [64]u8 = undefined;
+                    const cat_info = std.fmt.bufPrint(&cat_info_buf, "{s}: {d} files ({s})", .{
+                        cat.getName(),
+                        category_counts[i],
+                        cat_size_str,
+                    }) catch "";
+
+                    buf.drawStringMax(inner.x + 4, inner.y + y, cat_info, inner.width - 6, getCategoryStyle(cat, false));
+                    y += 1;
+                }
+                _ = field;
+            }
+        }
+
+        // Instructions
+        buf.drawString(inner.x + 2, inner.y + inner.height - 1, "[q/Esc] Close", Style.default.withFg(.cyan));
+    }
+
     /// Draw help overlay
     fn drawHelp(self: *App, buf: *Buffer, area: Rect) void {
         _ = self;
 
         const help_width: u16 = 60;
-        const help_height: u16 = 18;
+        const help_height: u16 = 24;
         const help_x = (area.width - help_width) / 2;
         const help_y = (area.height - help_height) / 2;
 
@@ -615,9 +1205,15 @@ pub const App = struct {
             "  a               Select all",
             "  n               Deselect all",
             "",
-            "Actions:",
-            "  Enter           View details",
+            "Deletion:",
             "  d               Delete selected",
+            "  u               Undo last delete",
+            "  h               View deletion history",
+            "  t               Toggle trash/permanent",
+            "",
+            "Other:",
+            "  Enter           View details",
+            "  r               Show space report",
             "  s               Start scan",
             "  q               Quit",
         };

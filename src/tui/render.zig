@@ -273,19 +273,20 @@ pub const BorderStyle = enum {
 /// Renderer that handles double-buffering and efficient updates
 pub const Renderer = struct {
     allocator: std.mem.Allocator,
-    term: *Terminal,
+    tty: std.fs.File,
     front: Buffer,
     back: Buffer,
 
-    pub fn init(allocator: std.mem.Allocator, term: *Terminal) !Renderer {
-        const w = term.size.width;
-        const h = term.size.height;
+    pub fn init(allocator: std.mem.Allocator, tty: std.fs.File, width: u16, height: u16) !Renderer {
+        const front = try Buffer.init(allocator, width, height);
+        // Initialize front buffer with a sentinel value so first render draws everything
+        @memset(front.cells, Cell{ .char = 0, .style = Style.default });
 
         return Renderer{
             .allocator = allocator,
-            .term = term,
-            .front = try Buffer.init(allocator, w, h),
-            .back = try Buffer.init(allocator, w, h),
+            .tty = tty,
+            .front = front,
+            .back = try Buffer.init(allocator, width, height),
         };
     }
 
@@ -314,9 +315,18 @@ pub const Renderer = struct {
         self.back.clear();
     }
 
+    /// Write to terminal
+    fn write(self: *Renderer, data: []const u8) void {
+        _ = self.tty.write(data) catch {};
+    }
+
     /// Render changes to terminal (differential update)
     pub fn render(self: *Renderer) void {
-        var output_buf: [16384]u8 = undefined;
+        // Buffer size constant and safety margin
+        // Max bytes per cell: moveTo(~12) + style(~30) + utf8(4) = ~46 bytes
+        const buf_size = 16384;
+        const flush_threshold = buf_size - 128; // Generous margin for safety
+        var output_buf: [buf_size]u8 = undefined;
         var pos: usize = 0;
 
         var last_style: ?Style = null;
@@ -332,6 +342,13 @@ pub const Renderer = struct {
                 // Skip if unchanged
                 if (back_cell.eql(front_cell)) continue;
 
+                // Flush before writing if buffer is getting full (check BEFORE writing)
+                if (pos >= flush_threshold) {
+                    self.write(output_buf[0..pos]);
+                    pos = 0;
+                    last_style = null; // Style must be re-sent after flush
+                }
+
                 // Move cursor
                 const move_seq = terminal.Escape.moveTo(output_buf[pos..], y + 1, x + 1);
                 pos += move_seq.len;
@@ -344,12 +361,6 @@ pub const Renderer = struct {
 
                 // Write character (UTF-8 encode)
                 pos += writeUtf8(output_buf[pos..], back_cell.char);
-
-                // Flush if buffer getting full
-                if (pos > output_buf.len - 256) {
-                    self.term.write(output_buf[0..pos]);
-                    pos = 0;
-                }
             }
         }
 
@@ -360,7 +371,7 @@ pub const Renderer = struct {
         }
 
         if (pos > 0) {
-            self.term.write(output_buf[0..pos]);
+            self.write(output_buf[0..pos]);
         }
 
         // Swap buffers
@@ -374,16 +385,10 @@ pub const Renderer = struct {
         self.render();
     }
 
-    /// Handle resize
-    pub fn handleResize(self: *Renderer) !void {
-        self.term.refreshSize();
-        const w = self.term.size.width;
-        const h = self.term.size.height;
-
-        try self.front.resize(w, h);
-        try self.back.resize(w, h);
-
-        self.term.clear();
+    /// Handle resize with new dimensions
+    pub fn handleResize(self: *Renderer, width: u16, height: u16) !void {
+        try self.front.resize(width, height);
+        try self.back.resize(width, height);
     }
 };
 

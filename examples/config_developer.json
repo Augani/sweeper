@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "scan_paths": [
+    "~/Projects",
+    "~/Development"
+  ],
+  "exclude_patterns": [
+    ".git",
+    ".svn",
+    "*.app",
+    "*.exe",
+    "venv",
+    ".venv"
+  ],
+  "min_file_size": 1048576,
+  "max_file_age_days": 60,
+  "show_hidden": false,
+  "use_trash": true,
+  "categories": {
+    "temp_files": true,
+    "cache_files": true,
+    "log_files": true,
+    "old_downloads": false,
+    "duplicates": true,
+    "large_files": true,
+    "dev_artifacts": true,
+    "browser_data": false
+  },
+  "analyzer": {
+    "large_file_threshold": 52428800,
+    "unused_days_threshold": 120,
+    "old_download_days": 30,
+    "detect_duplicates": true,
+    "max_hash_size": 536870912
+  },
+  "custom_rules": [
+    {
+      "name": "exclude_src_files",
+      "description": "Never delete source code files",
+      "type": "extension",
+      "pattern": ".rs",
+      "action": "exclude",
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "name": "exclude_source_code",
+      "description": "Protect source code extensions",
+      "type": "extension",
+      "pattern": ".zig",
+      "action": "exclude",
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "name": "target_build_dirs",
+      "description": "Mark Rust/Zig build directories as safe to delete",
+      "type": "directory",
+      "pattern": "/target/",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "category": "dev_artifact"
+    },
+    {
+      "name": "zig_cache",
+      "description": "Zig cache directories can be deleted",
+      "type": "directory",
+      "pattern": "/zig-cache/",
+      "action": "mark_safe",
+      "priority": 75,
+      "enabled": true,
+      "category": "cache"
+    },
+    {
+      "name": "large_build_artifacts",
+      "description": "Large compiled files",
+      "type": "size_range",
+      "pattern": "",
+      "action": "mark_safe",
+      "priority": 50,
+      "enabled": true,
+      "size_min": 10485760,
+      "category": "dev_artifact"
+    }
+  ]
+}

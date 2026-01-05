@@ -223,6 +223,11 @@ pub const Scanner = struct {
             file.deinit(self.allocator);
         }
         self.results.deinit(self.allocator);
+
+        // Free error paths that were duplicated
+        for (self.errors_list.items) |err_info| {
+            self.allocator.free(err_info.path);
+        }
         self.errors_list.deinit(self.allocator);
         self.visited_inodes.deinit(self.allocator);
     }
@@ -502,7 +507,7 @@ pub const Scanner = struct {
             .is_executable = attrs.is_executable,
             .extension = null,
             .mode = stat.mode,
-            .inode = stat.inode,
+            .inode = @bitCast(stat.inode), // Handle i64 -> u64 on Windows
             .attributes = attrs,
         };
 
@@ -561,7 +566,7 @@ pub const Scanner = struct {
             .is_executable = attrs.is_executable,
             .extension = extension,
             .mode = stat.mode,
-            .inode = stat.inode,
+            .inode = @bitCast(stat.inode), // Handle i64 -> u64 on Windows
             .attributes = attrs,
         };
 
@@ -679,12 +684,12 @@ pub fn getFileAgeDays(mtime: i128) u64 {
 
 /// Quick scan function for a single directory (non-recursive)
 pub fn quickScan(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(FileInfo) {
-    var results = std.ArrayList(FileInfo).init(allocator);
+    var results = std.ArrayList(FileInfo){};
     errdefer {
         for (results.items) |*item| {
             item.deinit(allocator);
         }
-        results.deinit();
+        results.deinit(allocator);
     }
 
     var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
@@ -722,7 +727,7 @@ pub fn quickScan(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(
             .attributes = attrs,
         };
 
-        try results.append(file_info);
+        try results.append(allocator, file_info);
     }
 
     return results;
@@ -737,12 +742,12 @@ pub const QuickScanOptions = struct {
 };
 
 pub fn quickScanFiltered(allocator: std.mem.Allocator, path: []const u8, opts: QuickScanOptions) !std.ArrayList(FileInfo) {
-    var results = std.ArrayList(FileInfo).init(allocator);
+    var results = std.ArrayList(FileInfo){};
     errdefer {
         for (results.items) |*item| {
             item.deinit(allocator);
         }
-        results.deinit();
+        results.deinit(allocator);
     }
 
     var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
@@ -805,7 +810,7 @@ pub fn quickScanFiltered(allocator: std.mem.Allocator, path: []const u8, opts: Q
             .attributes = attrs,
         };
 
-        try results.append(file_info);
+        try results.append(allocator, file_info);
     }
 
     return results;
@@ -857,12 +862,12 @@ pub fn isDirectory(path: []const u8) bool {
 
 /// Get platform-specific default scan paths
 pub fn getDefaultScanPaths(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-    var paths = std.ArrayList([]const u8).init(allocator);
+    var paths = std.ArrayList([]const u8){};
     errdefer {
         for (paths.items) |p| {
             allocator.free(p);
         }
-        paths.deinit();
+        paths.deinit(allocator);
     }
 
     const plat_paths = try platform.Paths.get(allocator);
@@ -870,25 +875,25 @@ pub fn getDefaultScanPaths(allocator: std.mem.Allocator) !std.ArrayList([]const 
     defer mutable_plat_paths.deinit(allocator);
 
     // Add common cleanup targets
-    try paths.append(try allocator.dupe(u8, plat_paths.temp));
-    try paths.append(try allocator.dupe(u8, plat_paths.cache));
+    try paths.append(allocator, try allocator.dupe(u8, plat_paths.temp));
+    try paths.append(allocator, try allocator.dupe(u8, plat_paths.cache));
 
     // Add platform-specific paths
     switch (platform.Platform.current()) {
         .macos => {
             const home = plat_paths.home;
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}/Downloads", .{home}));
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}/Library/Logs", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}/Downloads", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}/Library/Logs", .{home}));
         },
         .windows => {
             const home = plat_paths.home;
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}\\Downloads", .{home}));
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}\\AppData\\Local\\Temp", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}\\Downloads", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}\\AppData\\Local\\Temp", .{home}));
         },
         .linux => {
             const home = plat_paths.home;
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}/Downloads", .{home}));
-            try paths.append(try std.fmt.allocPrint(allocator, "{s}/.local/share/Trash/files", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}/Downloads", .{home}));
+            try paths.append(allocator, try std.fmt.allocPrint(allocator, "{s}/.local/share/Trash/files", .{home}));
         },
         .unknown => {},
     }

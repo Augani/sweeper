@@ -107,7 +107,16 @@ pub const Terminal = struct {
 
     /// Initialize terminal
     pub fn init() !Terminal {
-        const tty = std.fs.File.stdout();
+        // Try to open /dev/tty for direct terminal access
+        const tty = if (builtin.os.tag == .windows)
+            std.fs.File.stdout()
+        else blk: {
+            const file = std.fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write }) catch |err| {
+                std.debug.print("Failed to open /dev/tty: {}, using stdout\n", .{err});
+                break :blk std.fs.File.stdout();
+            };
+            break :blk file;
+        };
 
         var term = Terminal{
             .tty = tty,
@@ -165,7 +174,10 @@ pub const Terminal = struct {
         }
 
         const fd = self.tty.handle;
-        self.original_termios = std.posix.tcgetattr(fd) catch return;
+        self.original_termios = std.posix.tcgetattr(fd) catch |err| {
+            std.debug.print("Failed to get terminal attributes: {}\n", .{err});
+            return err;
+        };
 
         var raw = self.original_termios.?;
 
