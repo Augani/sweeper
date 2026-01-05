@@ -35,11 +35,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: master
-      
+      - name: Setup Zig (macOS ARM)
+        if: matrix.name == 'macos-arm64'
+        run: |
+          curl -L "https://ziglang.org/builds/zig-aarch64-macos-0.16.0-dev.1912%2B0cbaaa5eb.tar.xz" | tar -xJ
+          mv zig-aarch64-macos-* zig
+          echo "$PWD/zig" >> $GITHUB_PATH
+
+      - name: Setup Zig (macOS x64)
+        if: matrix.name == 'macos-x64'
+        run: |
+          curl -L "https://ziglang.org/builds/zig-x86_64-macos-0.16.0-dev.1912%2B0cbaaa5eb.tar.xz" | tar -xJ
+          mv zig-x86_64-macos-* zig
+          echo "$PWD/zig" >> $GITHUB_PATH
+
+      - name: Setup Zig (Linux)
+        if: matrix.name == 'linux-x64'
+        run: |
+          curl -L "https://ziglang.org/builds/zig-x86_64-linux-0.16.0-dev.1912%2B0cbaaa5eb.tar.xz" | tar -xJ
+          mv zig-x86_64-linux-* zig
+          echo "$PWD/zig" >> $GITHUB_PATH
+
+      - name: Setup Zig (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://ziglang.org/builds/zig-x86_64-windows-0.16.0-dev.1912%2B0cbaaa5eb.zip" -OutFile zig.zip
+          Expand-Archive zig.zip -DestinationPath .
+          Rename-Item zig-x86_64-windows-* zig
+          echo "$PWD\zig" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: Build
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
       
