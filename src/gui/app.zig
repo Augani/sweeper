@@ -1001,7 +1001,14 @@ pub const GuiApp = struct {
             self.status_message = "Deletion failed";
             return;
         };
-        defer self.allocator.free(results);
+        defer {
+            // Free each result's allocated strings, then free the array
+            for (results) |*result| {
+                var r = result.*;
+                r.deinit(self.allocator);
+            }
+            self.allocator.free(results);
+        }
 
         // Calculate freed space and count successes/failures
         var freed: u64 = 0;
