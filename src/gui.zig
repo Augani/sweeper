@@ -60,6 +60,15 @@ pub fn run(allocator: std.mem.Allocator) !void {
         rl.unloadFont(theme.font_bold);
     };
 
+    // Load and set window icon
+    const icon_path = "resources/icon.png";
+    if (rl.loadImage(icon_path)) |icon| {
+        icon.useAsWindowIcon();
+        rl.unloadImage(icon);
+    } else |_| {
+        // Icon not found, continue without it
+    }
+
     // Center window on screen and bring to front
     const monitor_w = rl.getMonitorWidth(0);
     const monitor_h = rl.getMonitorHeight(0);

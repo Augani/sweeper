@@ -5,7 +5,7 @@ import Features from './components/Features';
 import AppPreview from './components/AppPreview';
 import Stats from './components/Stats';
 import Footer from './components/Footer';
-import { Download, Github, Terminal, Zap, Trash2, HardDrive } from 'lucide-react';
+import { Download, Github, Terminal } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 
 const App: React.FC = () => {
@@ -39,23 +39,30 @@ const App: React.FC = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center shadow-2xl max-w-4xl mx-auto overflow-hidden relative">
               {/* Subtle accent in the dark card */}
               <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 blur-[80px] rounded-full pointer-events-none"></div>
-              
+
               <h2 className="text-4xl md:text-5xl font-display font-bold mb-6 text-white relative z-10">
                 Ready to reclaim your space?
               </h2>
               <p className="text-xl text-gray-400 mb-8 max-w-2xl mx-auto relative z-10">
-                Join thousands of developers who have cleared terabytes of unused data. Open source, fast, and safe.
+                Join developers who have cleared terabytes of unused data. Open source, fast, and safe.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center relative z-10">
-                <button className="px-8 py-4 bg-primary text-white font-bold rounded-full hover:bg-red-700 transition-colors flex items-center gap-2 group shadow-lg shadow-red-900/20">
+                <a href="https://github.com/Augani/sweeper/releases" className="px-8 py-4 bg-primary text-white font-bold rounded-full hover:bg-red-700 transition-colors flex items-center gap-2 group shadow-lg shadow-red-900/20">
                   <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />
-                  Download for Mac/Windows
-                </button>
-                <button className="px-8 py-4 bg-white/10 border border-white/20 text-white font-bold rounded-full hover:bg-white/20 transition-colors flex items-center gap-2">
+                  Download GUI
+                </a>
+                <a href="https://github.com/Augani/sweeper/releases" className="px-8 py-4 bg-white/10 border border-white/20 text-white font-bold rounded-full hover:bg-white/20 transition-colors flex items-center gap-2">
+                  <Terminal className="w-5 h-5" />
+                  Download CLI
+                </a>
+                <a href="https://github.com/Augani/sweeper" target="_blank" rel="noopener noreferrer" className="px-8 py-4 bg-white/10 border border-white/20 text-white font-bold rounded-full hover:bg-white/20 transition-colors flex items-center gap-2">
                   <Github className="w-5 h-5" />
-                  View Source
-                </button>
+                  Source
+                </a>
               </div>
+              <p className="mt-6 text-sm text-gray-500 relative z-10">
+                Available for macOS, Linux, and Windows • GUI (~2MB) • CLI (~660KB)
+              </p>
             </div>
           </section>
         </main>

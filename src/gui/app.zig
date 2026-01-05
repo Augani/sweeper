@@ -71,9 +71,9 @@ pub const View = enum {
 /// Scan phase for incremental scanning
 pub const ScanPhase = enum {
     not_started,
-    collecting_paths,
-    scanning_files,
-    analyzing,
+    waiting_for_discovery, // Background thread running find command
+    processing_results, // Processing discovered paths
+    calculating_sizes, // Calculating sizes incrementally
     done,
 };
 
@@ -121,6 +121,12 @@ pub const GuiApp = struct {
     scan_file_results: std.ArrayListUnmanaged(scanner.FileInfo),
     scan_files_processed: usize,
 
+    // Background scan thread
+    scan_thread: ?std.Thread,
+    scan_thread_done: bool,
+    scan_thread_result: ?[]u8,
+    scan_home_path: ?[]u8,
+
     pub fn init(allocator: std.mem.Allocator) !GuiApp {
         return GuiApp{
             .allocator = allocator,
@@ -146,10 +152,19 @@ pub const GuiApp = struct {
             .scan_pending_dirs = .{},
             .scan_file_results = .{},
             .scan_files_processed = 0,
+            .scan_thread = null,
+            .scan_thread_done = false,
+            .scan_thread_result = null,
+            .scan_home_path = null,
         };
     }
 
     pub fn deinit(self: *GuiApp) void {
+        // Wait for scan thread if running
+        if (self.scan_thread) |thread| {
+            thread.join();
+        }
+
         for (self.files.items) |file| {
             self.allocator.free(file.path);
         }
@@ -172,6 +187,13 @@ pub const GuiApp = struct {
         }
         self.scan_file_results.deinit(self.allocator);
 
+        if (self.scan_thread_result) |r| {
+            self.allocator.free(r);
+        }
+        if (self.scan_home_path) |h| {
+            self.allocator.free(h);
+        }
+
         if (self.file_deleter) |d| {
             d.deinit();
             self.allocator.destroy(d);
@@ -180,7 +202,15 @@ pub const GuiApp = struct {
 
     /// Start filesystem scan using fast system commands
     pub fn startScan(self: *GuiApp) void {
-        // Clear previous
+        const builtin = @import("builtin");
+
+        // Wait for any existing scan thread
+        if (self.scan_thread) |thread| {
+            thread.join();
+            self.scan_thread = null;
+        }
+
+        // Clear previous results
         for (self.files.items) |file| {
             self.allocator.free(file.path);
         }
@@ -192,41 +222,89 @@ pub const GuiApp = struct {
         self.category_sizes = [_]u64{0} ** 10;
         self.scan_files_processed = 0;
 
+        // Clean up previous thread result
+        if (self.scan_thread_result) |r| {
+            self.allocator.free(r);
+            self.scan_thread_result = null;
+        }
+        if (self.scan_home_path) |h| {
+            self.allocator.free(h);
+        }
+
+        // Get home directory
+        self.scan_home_path = if (builtin.os.tag == .windows)
+            std.process.getEnvVarOwned(self.allocator, "USERPROFILE") catch
+                std.process.getEnvVarOwned(self.allocator, "HOMEDRIVE") catch null
+        else
+            std.process.getEnvVarOwned(self.allocator, "HOME") catch null;
+
         self.view = .scanning;
-        self.scan_phase = .collecting_paths;
-        self.scan_progress = 0.0;
+        self.scan_phase = .waiting_for_discovery;
+        self.scan_progress = 0.05;
+        self.scan_thread_done = false;
+
+        // Spawn background thread for find command
+        self.scan_thread = std.Thread.spawn(.{}, scanThreadFn, .{self}) catch null;
+    }
+
+    /// Background thread function for scanning
+    fn scanThreadFn(self: *GuiApp) void {
+        const builtin = @import("builtin");
+        const home = self.scan_home_path orelse return;
+
+        // Run the find command (this is blocking but in a separate thread)
+        const result = if (builtin.os.tag == .windows)
+            self.findDevArtifactsWindows(home)
+        else
+            self.findDevArtifactsUnix(home);
+
+        self.scan_thread_result = result;
+        self.scan_thread_done = true;
     }
 
     /// Process scan incrementally (called from update)
     fn processScanPhase(self: *GuiApp) void {
-        const builtin = @import("builtin");
-
-        // Get home directory (cross-platform)
-        const home = if (builtin.os.tag == .windows)
-            std.process.getEnvVarOwned(self.allocator, "USERPROFILE") catch
-                std.process.getEnvVarOwned(self.allocator, "HOMEDRIVE") catch "C:\\"
-        else
-            std.process.getEnvVarOwned(self.allocator, "HOME") catch "/tmp";
-        defer self.allocator.free(home);
-
         switch (self.scan_phase) {
             .not_started => {},
-            .collecting_paths => {
-                // Phase 1: Find dev artifacts
-                self.scan_progress = 0.1;
-                self.findDevArtifacts(home);
-                self.scan_phase = .scanning_files;
+
+            .waiting_for_discovery => {
+                // Poll: Is background thread done?
+                if (self.scan_thread_done) {
+                    // Join the thread
+                    if (self.scan_thread) |thread| {
+                        thread.join();
+                        self.scan_thread = null;
+                    }
+
+                    // Process results from find command
+                    if (self.scan_thread_result) |stdout| {
+                        self.parseFoundPaths(stdout);
+                        self.allocator.free(stdout);
+                        self.scan_thread_result = null;
+                    }
+
+                    // Add known cache directories (fast, no blocking)
+                    if (self.scan_home_path) |home| {
+                        self.addKnownCacheDirs(home);
+                    }
+
+                    self.scan_phase = .calculating_sizes;
+                    self.scan_files_processed = 0;
+                    self.scan_progress = 0.2;
+                } else {
+                    // Still waiting - animate progress
+                    self.scan_progress = 0.05 + 0.1 * @as(f32, @floatCast(@mod(@as(f64, @floatCast(rl.getTime())), 1.0)));
+                }
             },
-            .scanning_files => {
-                // Phase 2: Add known cache dirs
-                self.scan_progress = 0.3;
-                self.addKnownCacheDirs(home);
-                self.scan_phase = .analyzing;
-                self.scan_files_processed = 0;
+
+            .processing_results => {
+                // This phase is now combined with waiting_for_discovery
+                self.scan_phase = .calculating_sizes;
             },
-            .analyzing => {
-                // Phase 3: Calculate sizes incrementally (3 per frame)
-                const batch_size: usize = 3;
+
+            .calculating_sizes => {
+                // Calculate sizes incrementally (5 per frame for responsiveness)
+                const batch_size: usize = 5;
                 var processed: usize = 0;
 
                 while (self.scan_files_processed < self.files.items.len and processed < batch_size) {
@@ -241,7 +319,7 @@ pub const GuiApp = struct {
 
                 // Update progress
                 if (self.files.items.len > 0) {
-                    self.scan_progress = 0.3 + 0.6 * (@as(f32, @floatFromInt(self.scan_files_processed)) / @as(f32, @floatFromInt(self.files.items.len)));
+                    self.scan_progress = 0.2 + 0.75 * (@as(f32, @floatFromInt(self.scan_files_processed)) / @as(f32, @floatFromInt(self.files.items.len)));
                 }
 
                 // Check if done
@@ -249,8 +327,9 @@ pub const GuiApp = struct {
                     self.scan_phase = .done;
                 }
             },
+
             .done => {
-                // Phase 4: Finish up
+                // Sort by size descending
                 std.mem.sort(FileItem, self.files.items, {}, struct {
                     fn f(_: void, a: FileItem, b: FileItem) bool {
                         return a.size > b.size;
@@ -1183,33 +1262,36 @@ pub const GuiApp = struct {
         const donut_cx = chart_x + @divTrunc(chart_w, 2);
         const donut_cy = chart_y + @divTrunc(chart_h, 2) - 40;
         
-        // Build segments
-        var segments: [4]widgets.ChartSegment = undefined;
-        // Simplified breakdown for visual match
-        segments[0] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.dev_artifact)]), .color = theme.colors.chart_1, .label = "Node Modules" };
-        segments[1] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.cache)]), .color = theme.colors.chart_2, .label = "Rust Builds" };
-        segments[2] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.large)]), .color = theme.colors.chart_6, .label = "Docker Overlay" };
-        segments[3] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.temporary)]), .color = theme.colors.chart_4, .label = "Temp Files" };
-        
+        // Build segments from actual category data
+        var segments: [5]widgets.ChartSegment = undefined;
+        segments[0] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.dev_artifact)]), .color = theme.colors.chart_1, .label = "Dev Artifacts" };
+        segments[1] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.cache)]), .color = theme.colors.chart_2, .label = "Caches" };
+        segments[2] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.temporary)]), .color = theme.colors.chart_3, .label = "Temp Files" };
+        segments[3] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.log)]), .color = theme.colors.chart_4, .label = "Logs" };
+        segments[4] = .{ .value = @floatFromInt(self.category_sizes[@intFromEnum(analyzer.FileCategory.browser_data)]), .color = theme.colors.chart_5, .label = "Browser Data" };
+
         // Thicker donut
         widgets.drawDonutChart(donut_cx, donut_cy, radius, 35, &segments);
-        
-        // Legend at bottom
-        var legend_y = chart_y + chart_h - 160;
-        
+
+        // Legend - only show categories with data
+        var legend_y = chart_y + chart_h - 180;
+
         for (segments) |seg| {
+            // Skip empty categories
+            if (seg.value < 1.0) continue;
+
             rl.drawCircle(chart_x + 30, legend_y + 6, 4, seg.color);
             widgets.drawLabel(seg.label, chart_x + 45, legend_y, theme.fonts.small, theme.colors.text_secondary);
-            
-            // PCT
-            const total = @max(1.0, @as(f32, @floatFromInt(self.total_size)));
-            var pct_buf: [16]u8 = undefined;
-            const val = if (self.total_size == 0) 25.0 else (seg.value / total) * 100.0; // Mock 25% if empty for visual
-            const pct = std.fmt.bufPrint(&pct_buf, "{d:.0}%", .{ val }) catch "0%";
-            var pct_z: [16:0]u8 = undefined; @memcpy(pct_z[0..pct.len], pct); pct_z[pct.len] = 0;
-            
-            widgets.drawStrong(&pct_z, chart_x + chart_w - 60, legend_y, theme.fonts.small, theme.colors.text_primary);
-            legend_y += 30;
+
+            // Show size instead of percentage for clarity
+            var sz_buf: [32]u8 = undefined;
+            const sz_str = widgets.formatSizeBuffer(@intFromFloat(seg.value), &sz_buf);
+            var sz_z: [32:0]u8 = undefined;
+            @memcpy(sz_z[0..sz_str.len], sz_str);
+            sz_z[sz_str.len] = 0;
+
+            widgets.drawStrong(&sz_z, chart_x + chart_w - 80, legend_y, theme.fonts.small, theme.colors.text_primary);
+            legend_y += 28;
         }
         
         // 2. File List Card

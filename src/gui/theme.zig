@@ -114,7 +114,7 @@ pub const ButtonStyle = struct {
         .bg = colors.accent,
         .bg_hover = colors.accent_hover,
         .bg_active = colors.accent_secondary,
-        .text = rl.Color.init(24, 24, 37, 255), // Dark text on light accent
+        .text = rl.Color.init(255, 255, 255, 255), // White text on red
         .border = colors.accent,
     };
 

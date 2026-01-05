@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#DC2626"/>
+      <stop offset="100%" style="stop-color:#EA580C"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg-gradient)"/>
+  <!-- Broom/Sweeper icon -->
+  <g transform="translate(96, 96)" stroke="white" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Broom handle -->
+    <line x1="280" y1="40" x2="120" y2="200"/>
+    <!-- Broom head base -->
+    <path d="M40 280 L120 200 L200 280"/>
+    <!-- Bristles -->
+    <line x1="60" y1="280" x2="40" y2="320"/>
+    <line x1="100" y1="280" x2="100" y2="320"/>
+    <line x1="140" y1="280" x2="140" y2="320"/>
+    <line x1="180" y1="280" x2="200" y2="320"/>
+    <!-- Sparkle/clean indicator -->
+    <circle cx="260" cy="100" r="8" fill="white" stroke="none"/>
+    <line x1="260" y1="70" x2="260" y2="60"/>
+    <line x1="260" y1="140" x2="260" y2="130"/>
+    <line x1="230" y1="100" x2="220" y2="100"/>
+    <line x1="290" y1="100" x2="300" y2="100"/>
+  </g>
+</svg>

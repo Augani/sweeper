@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Zap, Clock, Code, Database, ShieldCheck } from 'lucide-react';
+import { Layers, Zap, Clock, Code, Database, ShieldCheck, Terminal, Monitor } from 'lucide-react';
 
 const FEATURES = [
   {
@@ -13,9 +13,9 @@ const FEATURES = [
     description: 'Automatically flags projects and files you haven\'t touched in over 90 days, keeping your active workspace clean.'
   },
   {
-    icon: Code,
-    title: 'Developer Centric',
-    description: 'Built specifically for developers. We know what `cargo clean` and `npm prune` do, but we do it across your entire drive at once.'
+    icon: Terminal,
+    title: 'GUI, TUI & CLI',
+    description: 'Choose your interface: beautiful GUI for visual users, TUI for terminal lovers, or headless CLI for scripts and automation.'
   },
   {
     icon: Database,
@@ -25,12 +25,12 @@ const FEATURES = [
   {
     icon: Zap,
     title: 'Blazing Fast',
-    description: 'Written in Rust (the core engine) for maximum performance. Scans terabytes of storage in seconds, not minutes.'
+    description: 'Written in Zig for maximum performance with zero dependencies. Scans terabytes of storage in seconds, not minutes.'
   },
   {
     icon: ShieldCheck,
     title: 'Safe Delete',
-    description: 'Items are moved to a staging area or Trash first. Review everything before permanent deletion. No accidents.'
+    description: 'Items are moved to Trash first. Review everything before permanent deletion. Press Z to undo. No accidents.'
   }
 ];
 

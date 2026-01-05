@@ -1,5 +1,5 @@
 import React from 'react';
-import { Github, Twitter, Heart } from 'lucide-react';
+import { Github, Heart } from 'lucide-react';
 
 const Footer: React.FC = () => {
   return (
@@ -19,19 +19,18 @@ const Footer: React.FC = () => {
           <div>
             <h4 className="text-white font-bold mb-4">Product</h4>
             <ul className="space-y-2">
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Download</a></li>
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Changelog</a></li>
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Documentation</a></li>
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Source Code</a></li>
+              <li><a href="https://github.com/Augani/sweeper/releases" className="text-zinc-400 hover:text-white transition-colors">Download</a></li>
+              <li><a href="https://github.com/Augani/sweeper/releases" className="text-zinc-400 hover:text-white transition-colors">Changelog</a></li>
+              <li><a href="https://github.com/Augani/sweeper#readme" className="text-zinc-400 hover:text-white transition-colors">Documentation</a></li>
+              <li><a href="https://github.com/Augani/sweeper" className="text-zinc-400 hover:text-white transition-colors">Source Code</a></li>
             </ul>
           </div>
-          
+
           <div>
             <h4 className="text-white font-bold mb-4">Legal</h4>
             <ul className="space-y-2">
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Privacy Policy</a></li>
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">Terms of Service</a></li>
-              <li><a href="#" className="text-zinc-400 hover:text-white transition-colors">MIT License</a></li>
+              <li><a href="https://github.com/Augani/sweeper/blob/main/LICENSE" className="text-zinc-400 hover:text-white transition-colors">MIT License</a></li>
+              <li><a href="https://github.com/Augani/sweeper/blob/main/CONTRIBUTING.md" className="text-zinc-400 hover:text-white transition-colors">Contributing</a></li>
             </ul>
           </div>
         </div>
@@ -41,8 +40,7 @@ const Footer: React.FC = () => {
             © {new Date().getFullYear()} Sweeper Inc. All rights reserved.
           </div>
           <div className="flex gap-6">
-            <a href="#" className="text-zinc-400 hover:text-white transition-colors"><Github className="w-5 h-5" /></a>
-            <a href="#" className="text-zinc-400 hover:text-white transition-colors"><Twitter className="w-5 h-5" /></a>
+            <a href="https://github.com/Augani/sweeper" target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-white transition-colors"><Github className="w-5 h-5" /></a>
           </div>
         </div>
       </div>
