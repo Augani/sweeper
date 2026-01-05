@@ -17,7 +17,7 @@ jobs:
             target: aarch64-macos
             name: macos-arm64
             ext: tar.gz
-          - os: macos-15
+          - os: macos-latest
             target: x86_64-macos
             name: macos-x64
             ext: tar.gz
@@ -31,60 +31,65 @@ jobs:
             ext: zip
 
     runs-on: ${{ matrix.os }}
-    
+    timeout-minutes: 60
+
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Zig (macOS ARM)
-        if: matrix.name == 'macos-arm64'
+
+      - name: Setup Zig (macOS)
+        if: runner.os == 'macOS'
         run: |
           curl -L "https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz" | tar -xJ
           echo "$PWD/zig-aarch64-macos-0.15.2" >> $GITHUB_PATH
 
-      - name: Setup Zig (macOS x64)
-        if: matrix.name == 'macos-x64'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
-          curl -L "https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz" | tar -xJ
-          echo "$PWD/zig-x86_64-macos-0.15.2" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxext-dev libxfixes-dev libgl1-mesa-dev
 
       - name: Setup Zig (Linux)
-        if: matrix.name == 'linux-x64'
+        if: runner.os == 'Linux'
         run: |
           curl -L "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz" | tar -xJ
           echo "$PWD/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
 
       - name: Setup Zig (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
+        if: runner.os == 'Windows'
+        shell: bash
         run: |
-          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip" -OutFile zig.zip
-          Expand-Archive zig.zip -DestinationPath .
-          echo "$PWD\zig-x86_64-windows-0.15.2" | Out-File -FilePath $env:GITHUB_PATH -Append
+          curl -L -o zig.zip "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip"
+          unzip -q zig.zip
+          echo "$PWD/zig-x86_64-windows-0.15.2" >> $GITHUB_PATH
 
-      - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
-      
+      - name: Build CLI
+        run: zig build sweeper -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+
+      - name: Build GUI
+        run: zig build sweeper-gui -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+        continue-on-error: true
+
       - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           mkdir -p sweeper-${{ matrix.name }}
-          cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
           cp zig-out/bin/sweeper sweeper-${{ matrix.name }}/ || true
+          cp zig-out/bin/sweeper-gui sweeper-${{ matrix.name }}/ || true
           cp -r resources sweeper-${{ matrix.name }}/ || true
           cp README.md LICENSE sweeper-${{ matrix.name }}/
           tar -czvf sweeper-${{ matrix.name }}.${{ matrix.ext }} sweeper-${{ matrix.name }}
-      
+
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path sweeper-${{ matrix.name }}
-          Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
           Copy-Item zig-out/bin/sweeper.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
+          Copy-Item zig-out/bin/sweeper-gui.exe sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
           Copy-Item -Recurse resources sweeper-${{ matrix.name }}/ -ErrorAction SilentlyContinue
           Copy-Item README.md,LICENSE sweeper-${{ matrix.name }}/
           Compress-Archive -Path sweeper-${{ matrix.name }} -DestinationPath sweeper-${{ matrix.name }}.${{ matrix.ext }}
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -94,15 +99,15 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
