@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Zap, Clock, Code, Database, ShieldCheck } from 'lucide-react';
+import { Layers, Zap, Clock, Code, Database, ShieldCheck, RefreshCw, Trash2 } from 'lucide-react';
 
 const FEATURES = [
   {
@@ -25,12 +25,22 @@ const FEATURES = [
   {
     icon: Zap,
     title: 'Blazing Fast',
-    description: 'Written in Rust (the core engine) for maximum performance. Scans terabytes of storage in seconds, not minutes.'
+    description: 'Written in Zig with raylib for maximum performance. Tiny binaries (~1MB GUI, ~630KB TUI) that scan your storage in seconds.'
   },
   {
     icon: ShieldCheck,
     title: 'Safe Delete',
-    description: 'Items are moved to a staging area or Trash first. Review everything before permanent deletion. No accidents.'
+    description: 'Items are moved to your system Trash first. Review everything before permanent deletion. Empty your Trash to see the freed space.'
+  },
+  {
+    icon: RefreshCw,
+    title: 'Run Multiple Times',
+    description: 'Keep running Sweeper to discover new build artifacts as you work. Each scan finds freshly created node_modules and caches.'
+  },
+  {
+    icon: Trash2,
+    title: 'Empty Trash to Free Space',
+    description: 'Files are moved to Trash for safety. To actually reclaim disk space, empty your system Trash after cleaning with Sweeper.'
   }
 ];
 

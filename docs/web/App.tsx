@@ -47,14 +47,14 @@ const App: React.FC = () => {
                 Join thousands of developers who have cleared terabytes of unused data. Open source, fast, and safe.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center relative z-10">
-                <button className="px-8 py-4 bg-primary text-white font-bold rounded-full hover:bg-red-700 transition-colors flex items-center gap-2 group shadow-lg shadow-red-900/20">
+                <a href="https://github.com/Augani/sweeper/releases" className="px-8 py-4 bg-primary text-white font-bold rounded-full hover:bg-red-700 transition-colors flex items-center gap-2 group shadow-lg shadow-red-900/20">
                   <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />
-                  Download for Mac/Windows
-                </button>
-                <button className="px-8 py-4 bg-white/10 border border-white/20 text-white font-bold rounded-full hover:bg-white/20 transition-colors flex items-center gap-2">
+                  Download for Mac/Windows/Linux
+                </a>
+                <a href="https://github.com/Augani/sweeper" className="px-8 py-4 bg-white/10 border border-white/20 text-white font-bold rounded-full hover:bg-white/20 transition-colors flex items-center gap-2">
                   <Github className="w-5 h-5" />
                   View Source
-                </button>
+                </a>
               </div>
             </div>
           </section>
