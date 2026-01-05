@@ -51,9 +51,28 @@ Download from the [Releases](https://github.com/augani/sweeper/releases) page.
 | Platform | Download |
 |----------|----------|
 | macOS (Apple Silicon) | `sweeper-macos-arm64.tar.gz` |
-| macOS (Intel) | `sweeper-macos-x64.tar.gz` |
 | Linux (x64) | `sweeper-linux-x64.tar.gz` |
 | Windows (x64) | `sweeper-windows-x64.zip` |
+
+#### macOS: First-time Launch
+
+macOS may block the app because it's not from the App Store. To run Sweeper:
+
+**Option 1: Right-click to Open**
+1. Right-click (or Control-click) on `sweeper-gui`
+2. Select "Open" from the menu
+3. Click "Open" in the dialog
+
+**Option 2: Remove quarantine attribute**
+```bash
+# After extracting, run:
+xattr -cr sweeper-macos-arm64/
+```
+
+**Option 3: System Settings**
+1. Go to System Settings > Privacy & Security
+2. Scroll down to find "sweeper-gui was blocked"
+3. Click "Open Anyway"
 
 ## Usage
 

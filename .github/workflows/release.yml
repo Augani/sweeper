@@ -76,6 +76,17 @@ jobs:
         shell: bash
         run: zig build -Doptimize=ReleaseFast
 
+      - name: Sign macOS binaries (ad-hoc)
+        if: runner.os == 'macOS'
+        run: |
+          # Ad-hoc sign the binaries for macOS
+          # This helps with Gatekeeper on ARM64 Macs
+          codesign --force --deep --sign - zig-out/bin/sweeper || true
+          codesign --force --deep --sign - zig-out/bin/sweeper-gui || true
+          # Verify signatures
+          codesign -v zig-out/bin/sweeper || true
+          codesign -v zig-out/bin/sweeper-gui || true
+
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
