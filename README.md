@@ -34,7 +34,7 @@ Requires [Zig 0.15+](https://ziglang.org/download/)
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/sweeper.git
+git clone https://github.com/augani/sweeper.git
 cd sweeper
 
 # Build GUI version
