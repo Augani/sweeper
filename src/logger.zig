@@ -154,7 +154,7 @@ pub const Logger = struct {
             , .{
                 std.time.timestamp(),
                 @tagName(builtin.os.tag),
-                "0.1.0",
+                "0.2.0",
             });
             defer self.allocator.free(header);
 
