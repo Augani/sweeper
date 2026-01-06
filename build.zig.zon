@@ -1,7 +1,7 @@
 .{
     .fingerprint = 0xf991301f345aaf5d,
     .name = .sweeper,
-    .version = "0.1.0",
+    .version = "0.2.0",
     .dependencies = .{
         .raylib_zig = .{
             .url = "git+https://github.com/raylib-zig/raylib-zig#a4d18b2d1cf8fdddec68b5b084535fca0475f466",

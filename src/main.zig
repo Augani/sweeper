@@ -11,7 +11,7 @@ const trash = @import("trash.zig");
 const history = @import("history.zig");
 const logger = @import("logger.zig");
 
-pub const version = "0.1.0";
+pub const version = "0.2.0";
 pub const app_name = "Desktop Cleanup";
 
 /// Simple writer wrapper for stdout
