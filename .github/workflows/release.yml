@@ -19,6 +19,11 @@ jobs:
             ext: tar.gz
             zig_url: https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz
             zig_dir: zig-aarch64-macos-0.15.2
+          - os: macos-15-intel
+            name: macos-x64
+            ext: tar.gz
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz
+            zig_dir: zig-x86_64-macos-0.15.2
           - os: ubuntu-latest
             name: linux-x64
             ext: tar.gz

@@ -161,6 +161,19 @@ pub const GuiApp = struct {
         };
     }
 
+    /// Free a FileItem's allocated memory
+    fn freeFileItem(self: *GuiApp, file: FileItem) void {
+        // Check if name is separately allocated (not a slice of path)
+        // If name pointer is outside the path memory range, it needs to be freed
+        const path_start = @intFromPtr(file.path.ptr);
+        const path_end = path_start + file.path.len;
+        const name_ptr = @intFromPtr(file.name.ptr);
+        if (name_ptr < path_start or name_ptr >= path_end) {
+            self.allocator.free(file.name);
+        }
+        self.allocator.free(file.path);
+    }
+
     pub fn deinit(self: *GuiApp) void {
         // Wait for scan thread if running
         if (self.scan_thread) |thread| {
@@ -168,7 +181,7 @@ pub const GuiApp = struct {
         }
 
         for (self.files.items) |file| {
-            self.allocator.free(file.path);
+            self.freeFileItem(file);
         }
         self.files.deinit(self.allocator);
         self.filtered_indices.deinit(self.allocator);
@@ -214,7 +227,7 @@ pub const GuiApp = struct {
 
         // Clear previous results
         for (self.files.items) |file| {
-            self.allocator.free(file.path);
+            self.freeFileItem(file);
         }
         self.files.clearRetainingCapacity();
         self.filtered_indices.clearRetainingCapacity();
@@ -759,6 +772,145 @@ pub const GuiApp = struct {
         };
     }
 
+    /// Expand CoreSimulator/Devices to show individual simulator devices
+    fn expandSimulatorDevices(self: *GuiApp, devices_path: []const u8, category: analyzer.FileCategory) void {
+        var dir = std.fs.openDirAbsolute(devices_path, .{ .iterate = true }) catch return;
+        defer dir.close();
+
+        const now_ns = std.time.nanoTimestamp();
+
+        var iter = dir.iterate();
+        while (iter.next() catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            // Skip hidden files and non-UUID directories
+            if (entry.name.len == 0 or entry.name[0] == '.') continue;
+            // UUID format check (simple validation)
+            if (entry.name.len != 36) continue;
+
+            // Build full path to device directory
+            const device_path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ devices_path, entry.name }) catch continue;
+
+            // Try to read device.plist to get friendly name
+            const plist_path = std.fmt.allocPrint(self.allocator, "{s}/device.plist", .{device_path}) catch {
+                self.allocator.free(device_path);
+                continue;
+            };
+            defer self.allocator.free(plist_path);
+
+            // Parse device.plist for name and runtime
+            const display_name = self.parseSimulatorPlist(plist_path) orelse blk: {
+                // Fallback to UUID if plist parsing fails
+                break :blk std.fmt.allocPrint(self.allocator, "Simulator ({s})", .{entry.name[0..8]}) catch {
+                    self.allocator.free(device_path);
+                    continue;
+                };
+            };
+
+            // Get modification time
+            var mtime: i128 = 0;
+            var days_old: u32 = 0;
+            if (std.fs.openDirAbsolute(device_path, .{})) |d| {
+                var opened_dir = d;
+                defer opened_dir.close();
+                if (opened_dir.stat()) |stat| {
+                    mtime = stat.mtime;
+                    const age_ns = now_ns - mtime;
+                    if (age_ns > 0) {
+                        const ns_per_day: i128 = 24 * 60 * 60 * 1_000_000_000;
+                        days_old = @intCast(@divTrunc(age_ns, ns_per_day));
+                    }
+                } else |_| {}
+            } else |_| {}
+
+            self.files.append(self.allocator, FileItem{
+                .path = device_path,
+                .name = display_name,
+                .size = 0,
+                .category = category,
+                .selected = false,
+                .confidence = 0.85, // Lower confidence - user should decide
+                .mtime = mtime,
+                .days_old = days_old,
+            }) catch {
+                self.allocator.free(device_path);
+                self.allocator.free(display_name);
+            };
+        }
+    }
+
+    /// Parse simulator device.plist to extract name and runtime
+    fn parseSimulatorPlist(self: *GuiApp, plist_path: []const u8) ?[]const u8 {
+        const file = std.fs.openFileAbsolute(plist_path, .{}) catch return null;
+        defer file.close();
+
+        const content = file.readToEndAlloc(self.allocator, 8192) catch return null;
+        defer self.allocator.free(content);
+
+        // Simple XML parsing for name and runtime
+        var name: ?[]const u8 = null;
+        var runtime: ?[]const u8 = null;
+
+        // Find <key>name</key><string>...</string>
+        if (std.mem.indexOf(u8, content, "<key>name</key>")) |name_key_pos| {
+            const after_key = content[name_key_pos..];
+            if (std.mem.indexOf(u8, after_key, "<string>")) |str_start| {
+                const value_start = name_key_pos + str_start + 8;
+                if (std.mem.indexOf(u8, content[value_start..], "</string>")) |str_end| {
+                    name = content[value_start .. value_start + str_end];
+                }
+            }
+        }
+
+        // Find <key>runtime</key><string>...</string>
+        if (std.mem.indexOf(u8, content, "<key>runtime</key>")) |runtime_key_pos| {
+            const after_key = content[runtime_key_pos..];
+            if (std.mem.indexOf(u8, after_key, "<string>")) |str_start| {
+                const value_start = runtime_key_pos + str_start + 8;
+                if (std.mem.indexOf(u8, content[value_start..], "</string>")) |str_end| {
+                    const full_runtime = content[value_start .. value_start + str_end];
+                    // Extract iOS version from "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+                    if (std.mem.indexOf(u8, full_runtime, "SimRuntime.")) |prefix_end| {
+                        runtime = full_runtime[prefix_end + 11 ..];
+                    }
+                }
+            }
+        }
+
+        // Build display name
+        if (name) |n| {
+            if (runtime) |r| {
+                // Convert "iOS-26-0" to "iOS 26.0"
+                var runtime_buf: [64]u8 = undefined;
+                var runtime_formatted: []const u8 = r;
+
+                // Replace dashes with dots/spaces for readability
+                var i: usize = 0;
+                var j: usize = 0;
+                var first_dash = true;
+                while (i < r.len and j < runtime_buf.len - 1) : (i += 1) {
+                    if (r[i] == '-') {
+                        if (first_dash) {
+                            runtime_buf[j] = ' ';
+                            first_dash = false;
+                        } else {
+                            runtime_buf[j] = '.';
+                        }
+                    } else {
+                        runtime_buf[j] = r[i];
+                    }
+                    j += 1;
+                }
+                runtime_formatted = runtime_buf[0..j];
+
+                return std.fmt.allocPrint(self.allocator, "{s} ({s})", .{ n, runtime_formatted }) catch null;
+            } else {
+                return self.allocator.dupe(u8, n) catch null;
+            }
+        }
+
+        return null;
+    }
+
     fn addPathIfExists(self: *GuiApp, home: []const u8, suffix: []const u8, category: analyzer.FileCategory) void {
         const full_path = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ home, suffix }) catch return;
 
@@ -766,6 +918,13 @@ pub const GuiApp = struct {
             self.allocator.free(full_path);
             return;
         };
+
+        // Special handling for CoreSimulator/Devices - expand to show individual simulators
+        if (std.mem.endsWith(u8, suffix, "/Library/Developer/CoreSimulator/Devices")) {
+            self.expandSimulatorDevices(full_path, category);
+            self.allocator.free(full_path);
+            return;
+        }
 
         // Get modification time and calculate age
         const now_ns = std.time.nanoTimestamp();
@@ -1038,7 +1197,7 @@ pub const GuiApp = struct {
                 }
 
                 if (was_deleted) {
-                    self.allocator.free(file.path);
+                    self.freeFileItem(file.*);
                     _ = self.files.orderedRemove(i);
                     continue;
                 } else {
@@ -1117,7 +1276,7 @@ pub const GuiApp = struct {
             self.category_sizes[@intFromEnum(file.category)] -= @min(result.bytes_freed, self.category_sizes[@intFromEnum(file.category)]);
 
             // Remove from list
-            self.allocator.free(file.path);
+            self.freeFileItem(file.*);
             _ = self.files.orderedRemove(idx);
             self.updateFilteredList();
             self.status_message = "Item deleted";
